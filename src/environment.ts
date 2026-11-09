@@ -215,7 +215,8 @@ export function makeSkyDome(invalidate: () => void) {
   });
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 20), material);
   mesh.frustumCulled = false;
-  mesh.renderOrder = -10;
+  // Opaque geometry can depth-reject the sky before its panorama is sampled.
+  mesh.renderOrder = 10;
   mesh.visible = false;
   new THREE.TextureLoader().load(
     `${import.meta.env.BASE_URL}space/deep-sky.webp`,

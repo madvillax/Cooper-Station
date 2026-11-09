@@ -278,8 +278,8 @@ export function createAtlas(invalidate: () => void) {
     if (next === "station") {
       const saturn = bodies.get("saturn")?.frame;
       if (saturn) {
-        saturn.position.set(19, 10, -49);
-        saturn.scale.setScalar(13.8);
+        saturn.position.set(28, 11, -65);
+        saturn.scale.setScalar(10.6);
         saturn.rotation.set(0.23, 0.08, -0.28);
       }
     }

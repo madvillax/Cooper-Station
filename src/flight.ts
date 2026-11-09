@@ -42,8 +42,8 @@ type Transition = {
 };
 
 const defaultOrbit: Record<Exclude<View, "habitat" | "ground">, Orbit> = {
-  orbital: { yaw: -0.03, pitch: 0.15, zoom: 1 },
-  cutaway: { yaw: 0.32, pitch: 0.39, zoom: 1 },
+  orbital: { yaw: -0.07, pitch: 0.13, zoom: 1 },
+  cutaway: { yaw: 0.37, pitch: 0.35, zoom: 1 },
 };
 const flyoverStart: Walk = { ...citySurface(0, 2.27), yaw: 0.035, pitch: -0.1 };
 const groundStart: Walk = {
@@ -62,6 +62,34 @@ const sunStop = solarRoute.indexOf("sun");
 
 function pose() {
   return { position: new THREE.Vector3(), rotation: new THREE.Quaternion() };
+}
+
+function stationReflections(renderer: THREE.WebGLRenderer) {
+  const studio = new THREE.Scene();
+  studio.background = new THREE.Color(0x424a52);
+  const panel = new THREE.PlaneGeometry();
+  const softboxes = [
+    { position: [-3.5, 5.4, 6], size: [3.7, 2.8], color: 0xfff0d5, intensity: 5.1 },
+    { position: [6.4, 0.9, 1.8], size: [5.4, 2.2], color: 0xc4d9e3, intensity: 1.4 },
+    { position: [1, -4.7, -4.9], size: [5, 2.5], color: 0xbcc6d0, intensity: 0.92 },
+  ];
+  const cards = softboxes.map(({ position, size, color, intensity }) => {
+    const card = new THREE.Mesh(panel, new THREE.MeshBasicMaterial({
+      color: new THREE.Color(color).multiplyScalar(intensity),
+      toneMapped: false,
+    }));
+    card.position.set(position[0], position[1], position[2]);
+    card.scale.set(size[0], size[1], 1);
+    card.lookAt(0, 0, 0);
+    studio.add(card);
+    return card;
+  });
+  const generator = new THREE.PMREMGenerator(renderer);
+  const reflection = generator.fromScene(studio, 0.045, 0.1, 20, { size: 128 });
+  generator.dispose();
+  panel.dispose();
+  for (const card of cards) card.material.dispose();
+  return reflection;
 }
 
 export function startFlight({
@@ -89,10 +117,14 @@ export function startFlight({
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
   renderer.localClippingEnabled = true;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.domElement.setAttribute("aria-hidden", "true");
 
   const scene = new THREE.Scene();
-  const atmosphere = new THREE.FogExp2(0x758b92, 0.034);
+  const atmosphere = new THREE.FogExp2(0x85989a, 0.069);
+  let reflection: THREE.WebGLRenderTarget | undefined;
+  scene.environmentIntensity = 0.71;
   const camera = new THREE.PerspectiveCamera(42, 1, 0.012, 450);
   const station = createStation();
   const cutPlane = new THREE.Plane();
@@ -113,21 +145,40 @@ export function startFlight({
   const sky = makeSkyDome(() => {
     dirty = true;
   });
+  const ambient = new THREE.HemisphereLight(0xd4e8ff, 0x384451, 1.3);
   scene.add(
     sky.mesh,
     stars.mesh,
     atlas.root,
     station.root,
-    new THREE.HemisphereLight(0xd4e8ff, 0x384451, 1.3),
+    ambient,
   );
 
   const sun = new THREE.DirectionalLight(0xf4e2d4, 3.22);
   sun.position.set(-5, 8, 9);
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = sun.shadow.camera.bottom = -9.6;
+  sun.shadow.camera.right = sun.shadow.camera.top = 9.6;
+  sun.shadow.camera.near = 0.4;
+  sun.shadow.camera.far = 26;
+  sun.shadow.camera.updateProjectionMatrix();
+  sun.shadow.bias = -0.00016;
+  sun.shadow.normalBias = 0.008;
+  sun.shadow.autoUpdate = false;
   const bounce = new THREE.DirectionalLight(0x9fc7ff, 1.04);
   bounce.position.set(5, -2, -8);
-  const interior = new THREE.PointLight(0xffe6bf, 21, 17, 1.5);
-  interior.position.set(0, 0, 1.4);
-  station.root.add(interior);
+  const interior = new THREE.PointLight(0xffe5c5, 0, 18, 1.64);
+  interior.position.set(0, 0, -0.24);
+  const daylight = new THREE.DirectionalLight(0xffebcd, 0);
+  daylight.position.set(0.23, -0.1, 1.7);
+  daylight.target.position.copy(cityPoint(0, 0.62));
+  daylight.shadow.mapSize.set(1024, 1024);
+  daylight.shadow.camera.near = 0.1;
+  daylight.shadow.camera.far = 5.3;
+  daylight.shadow.bias = -0.000036;
+  daylight.shadow.normalBias = 0.00013;
+  daylight.shadow.autoUpdate = false;
+  station.spin.add(interior, daylight, daylight.target);
   scene.add(sun, bounce);
 
   const desired = pose();
@@ -138,7 +189,15 @@ export function startFlight({
   const up = new THREE.Vector3();
   const side = new THREE.Vector3();
   const approach = new THREE.Vector3();
+  const wheelGate = new THREE.Vector3();
   const doorway = new THREE.Vector3();
+  const origin = new THREE.Vector3();
+  const departureOrbit = new THREE.Spherical();
+  const approachOrbit = new THREE.Spherical();
+  const approachRotation = new THREE.Quaternion();
+  const dockAxis = new THREE.Vector3(0, 0, 1).applyEuler(station.root.rotation);
+  daylight.shadow.camera.up.copy(dockAxis);
+  const dockHeading = Math.atan2(dockAxis.x, dockAxis.z);
   const localCamera = new THREE.Vector3();
   const cutNormal = new THREE.Vector3();
   const rootRotation = new THREE.Quaternion();
@@ -166,6 +225,14 @@ export function startFlight({
   let last = performance.now();
   let viewportWidth = 1;
   let viewportHeight = 1;
+  let maximumRatio = 1;
+  let pixelRatio = 1;
+  let previousDraw = 0;
+  let slowFrames = 0;
+  let fastFrames = 0;
+  let lastSunAngle = Infinity;
+  let lastSunUpdate = -Infinity;
+  let lastDaylightAngle = Infinity;
 
   function initialOrbit(): Orbit {
     if (isSolarDestination(destination)) return { yaw: 0, pitch: 0, zoom: 1 };
@@ -189,7 +256,7 @@ export function startFlight({
       case "blackhole":
         return 21 * Math.max(1, 0.75 / aspect);
       case "station":
-        return (view === "cutaway" ? 22.6 : 20.5) * Math.max(1, 0.91 / aspect);
+        return (view === "cutaway" ? 24.6 : 25.6) * Math.max(1, 1.09 / aspect);
       default:
         return 3.77 * Math.max(1, 0.69 / aspect);
     }
@@ -224,6 +291,9 @@ export function startFlight({
     keys.clear();
     setCutaway(false);
     station.root.visible = next === "station";
+    scene.environment = station.root.visible
+      ? (reflection ??= stationReflections(renderer)).texture
+      : null;
     if (!movingWithinSystem) atlas.setView(nextSolar ? "system" : next);
     orbitTarget = initialOrbit();
     orbit = {
@@ -316,7 +386,11 @@ export function startFlight({
         Math.sin(orbit.pitch) * distance,
         Math.cos(orbit.yaw) * Math.cos(orbit.pitch) * distance,
       );
-      focus.set(0, -(destination === "station" ? 0.043 : 0.024) * distance, 0);
+      focus.set(
+        destination === "station" ? -1.58 : 0,
+        -(destination === "station" ? 0.043 : 0.024) * distance,
+        0,
+      );
       cameraMatrix.lookAt(desired.position, focus, worldUp);
       desired.rotation.setFromRotationMatrix(cameraMatrix);
     }
@@ -328,12 +402,35 @@ export function startFlight({
     if (!viewportWidth || !viewportHeight) return;
     camera.aspect = viewportWidth / viewportHeight;
     camera.updateProjectionMatrix();
-    const density = Math.sqrt(5_200_000 / (viewportWidth * viewportHeight));
-    const pixelRatio = Math.min(devicePixelRatio, 2.35, density);
-    renderer.setPixelRatio(pixelRatio);
-    stars.setDensity(pixelRatio);
-    renderer.setSize(viewportWidth, viewportHeight, false);
+    const density = Math.sqrt(2_560_000 / (viewportWidth * viewportHeight));
+    maximumRatio = Math.min(devicePixelRatio, 1.65, density);
+    setRenderRatio(maximumRatio);
+    previousDraw = slowFrames = fastFrames = 0;
     dirty = true;
+  }
+
+  function setRenderRatio(ratio: number) {
+    pixelRatio = ratio;
+    renderer.setDrawingBufferSize(viewportWidth, viewportHeight, ratio);
+    stars.setDensity(ratio);
+  }
+
+  function adaptResolution(now: number) {
+    const interval = now - previousDraw;
+    if (previousDraw > 0) {
+      const missedBudget = interval > 48 ? 3 : interval > 23 ? 1 : -1;
+      slowFrames = Math.max(0, slowFrames + missedBudget);
+      fastFrames = interval < 18.8 ? fastFrames + 1 : 0;
+      const floor = Math.min(maximumRatio, 0.5);
+      if (slowFrames >= 6 && pixelRatio > floor) {
+        setRenderRatio(Math.max(floor, pixelRatio * (interval > 48 ? 0.68 : 0.86)));
+        slowFrames = fastFrames = 0;
+      } else if (fastFrames >= 150 && pixelRatio < maximumRatio) {
+        setRenderRatio(Math.min(maximumRatio, pixelRatio + 0.1));
+        slowFrames = fastFrames = 0;
+      }
+    }
+    previousDraw = now;
   }
 
   function setCutaway(enabled: boolean) {
@@ -353,7 +450,7 @@ export function startFlight({
     station.spin.worldToLocal(localCamera);
     const azimuth = Math.atan2(localCamera.x, -localCamera.y);
     station.removablePanels.forEach((panel, index) => {
-      const sector = ((index + 0.5) * TAU) / 12;
+      const sector = ((index + 0.5) * TAU) / station.removablePanels.length;
       panel.visible = Math.cos(sector - azimuth) < 0.37;
     });
     cutNormal.set(-localCamera.x, -localCamera.y, 0).normalize();
@@ -382,7 +479,8 @@ export function startFlight({
             rotation: camera.quaternion.clone(),
           },
           elapsed: 0,
-          duration: route === "orbital" ? 1.35 : 2.65,
+          duration: route === "orbital" ? 1.35
+            : route === "inbound" || route === "outbound" ? 3.1 : 2.65,
           route,
         };
     view = next;
@@ -431,7 +529,7 @@ export function startFlight({
     if (isHabitatView(view)) return;
     orbitTarget.zoom = clamp(
       orbitTarget.zoom * factor,
-      destination === "system" ? 0.74 : 0.39,
+      destination === "system" ? 0.74 : destination === "station" ? 0.44 : 0.39,
       2.6,
     );
     dirty = true;
@@ -474,6 +572,45 @@ export function startFlight({
     }
   }
 
+  function flyThroughDock(progress: number, orbital: Pose, habitat: Pose) {
+    station.spin.localToWorld(approach.copy(station.entryPath.approach));
+    const approachEnd = 0.44;
+    if (progress < approachEnd) {
+      const t = THREE.MathUtils.smootherstep(progress, 0, approachEnd);
+      departureOrbit.setFromVector3(orbital.position);
+      approachOrbit.setFromVector3(approach);
+      const approachArc = THREE.MathUtils.euclideanModulo(
+        dockHeading - departureOrbit.theta + Math.PI, TAU,
+      ) - Math.PI;
+      const gateOffset = THREE.MathUtils.euclideanModulo(
+        approachOrbit.theta - dockHeading + Math.PI, TAU,
+      ) - Math.PI;
+      camera.position.setFromSphericalCoords(
+        THREE.MathUtils.lerp(departureOrbit.radius, approachOrbit.radius, t),
+        THREE.MathUtils.lerp(departureOrbit.phi, approachOrbit.phi, t),
+        departureOrbit.theta + (approachArc + gateOffset) * t,
+      );
+      cameraMatrix.lookAt(camera.position, origin, worldUp);
+      approachRotation.setFromRotationMatrix(cameraMatrix);
+      camera.quaternion.slerpQuaternions(orbital.rotation, approachRotation, THREE.MathUtils.smoothstep(t, 0, 0.54));
+      return;
+    }
+
+    const t = THREE.MathUtils.smootherstep(progress, approachEnd, 1);
+    const s = 1 - t;
+    station.spin.localToWorld(wheelGate.copy(station.entryPath.wheel));
+    station.spin.localToWorld(doorway.copy(station.entryPath.interior));
+    camera.position
+      .copy(approach)
+      .multiplyScalar(s ** 3)
+      .addScaledVector(wheelGate, 3 * s * s * t)
+      .addScaledVector(doorway, 3 * s * t * t)
+      .addScaledVector(habitat.position, t ** 3);
+    cameraMatrix.lookAt(approach, origin, worldUp);
+    approachRotation.setFromRotationMatrix(cameraMatrix);
+    camera.quaternion.slerpQuaternions(approachRotation, habitat.rotation, t);
+  }
+
   function applyCamera(delta: number) {
     targetPose();
     if (!transition) {
@@ -484,41 +621,28 @@ export function startFlight({
     transition.elapsed += delta;
     const t = clamp(transition.elapsed / transition.duration, 0, 1);
     const eased = THREE.MathUtils.smootherstep(t, 0, 1);
-    if (transition.route !== "orbital") {
-      const descent =
-        transition.route === "landing" || transition.route === "takeoff";
-      const inbound =
-        transition.route === "inbound" || transition.route === "landing";
-      if (descent) {
-        approach.copy(cityPoint(CITY_LANDING.x, CITY_LANDING.z + 0.23, 0.31));
-        doorway.copy(cityPoint(CITY_LANDING.x, CITY_LANDING.z + 0.048, 0.014));
-        station.spin.localToWorld(approach);
-        station.spin.localToWorld(doorway);
-      } else {
-        approach.set(0.08, 0.16, HALF_LENGTH + 7.3);
-        doorway.set(-0.12, 0.08, HALF_LENGTH - 1.7);
-        station.root.localToWorld(approach);
-        station.root.localToWorld(doorway);
-      }
+    const { from, route } = transition;
+    if (route === "inbound" || route === "outbound") {
+      if (route === "inbound") flyThroughDock(t, from, desired);
+      else flyThroughDock(1 - t, desired, from);
+      if (t === 1) transition = null;
+      return;
+    }
+    if (route === "landing" || route === "takeoff") {
+      station.spin.localToWorld(approach.copy(cityPoint(CITY_LANDING.x, CITY_LANDING.z + 0.23, 0.31)));
+      station.spin.localToWorld(doorway.copy(cityPoint(CITY_LANDING.x, CITY_LANDING.z + 0.048, 0.014)));
+      const landing = route === "landing";
       const s = 1 - eased;
       camera.position
-        .copy(transition.from.position)
+        .copy(from.position)
         .multiplyScalar(s ** 3)
-        .addScaledVector(inbound ? approach : doorway, 3 * s * s * eased)
-        .addScaledVector(inbound ? doorway : approach, 3 * s * eased * eased)
+        .addScaledVector(landing ? approach : doorway, 3 * s * s * eased)
+        .addScaledVector(landing ? doorway : approach, 3 * s * eased * eased)
         .addScaledVector(desired.position, eased ** 3);
     } else {
-      camera.position.lerpVectors(
-        transition.from.position,
-        desired.position,
-        eased,
-      );
+      camera.position.lerpVectors(from.position, desired.position, eased);
     }
-    camera.quaternion.slerpQuaternions(
-      transition.from.rotation,
-      desired.rotation,
-      eased,
-    );
+    camera.quaternion.slerpQuaternions(from.rotation, desired.rotation, eased);
     if (t === 1) transition = null;
   }
 
@@ -529,9 +653,13 @@ export function startFlight({
   }
 
   function frame(now: number) {
-    const delta = Math.min((now - last) / 1000, 0.06);
+    const frameSeconds = Math.max(0, (now - last) / 1000);
+    const delta = Math.min(frameSeconds, 0.06);
     last = now;
-    if (!available || document.hidden) return;
+    if (!available || document.hidden) {
+      previousDraw = 0;
+      return;
+    }
     const spinning = destination === "station" && playing && rpm > 0;
     const animateSpace = destination !== "station" && !motionPreference.matches;
     const animateCity =
@@ -574,8 +702,10 @@ export function startFlight({
       !animateSpace &&
       !animateCity &&
       !flying
-    )
+    ) {
+      previousDraw = slowFrames = fastFrames = 0;
       return;
+    }
     if (keys.size && !transition && allowControls()) stepControls(delta);
     orbit.yaw = interpolate(orbit.yaw, orbitTarget.yaw, delta);
     orbit.pitch = interpolate(orbit.pitch, orbitTarget.pitch, delta);
@@ -587,14 +717,17 @@ export function startFlight({
         (station.spin.rotation.z + radiansPerSecond(rpm) * delta * timeScale) %
         TAU;
     }
-    station.root.updateMatrixWorld(true);
     atlas.update(elapsed);
-    applyCamera(delta);
+    applyCamera(Math.min(frameSeconds, 0.25));
     if (isCutaway) cutaway();
-    const inside =
-      isHabitatView(view) &&
-      (transition?.route !== "inbound" ||
-        transition.elapsed > transition.duration * 0.57);
+    let habitatLight = Number(isHabitatView(view));
+    if (transition?.route === "inbound" || transition?.route === "outbound") {
+      station.root.worldToLocal(localCamera.copy(camera.position));
+      habitatLight =
+        (1 - THREE.MathUtils.smoothstep(Math.abs(localCamera.z), HALF_LENGTH - 0.1, HALF_LENGTH + 1.64)) *
+        (1 - THREE.MathUtils.smoothstep(Math.hypot(localCamera.x, localCamera.y), RADIUS - 0.04, RADIUS + 0.24));
+    }
+    const inside = habitatLight > 0.53;
     const fov = interpolate(
       camera.fov,
       viewFov(view, inside),
@@ -609,7 +742,54 @@ export function startFlight({
       camera.updateProjectionMatrix();
       dirty = true;
     }
-    scene.fog = inside ? atmosphere : null;
+    atmosphere.density = habitatLight * 0.069;
+    scene.fog = habitatLight > 0 ? atmosphere : null;
+    adaptResolution(now);
+    const detailedLighting = pixelRatio >= Math.min(0.86, maximumRatio * 0.78);
+    sun.castShadow = detailedLighting && destination === "station" && !inside && !isCutaway;
+    const spinAngle = station.spin.rotation.z;
+    if (sun.castShadow) {
+      const angleChange = Math.abs(spinAngle - lastSunAngle);
+      if (now - lastSunUpdate >= 42 && angleChange >= 0.007) {
+        sun.shadow.needsUpdate = true;
+        lastSunAngle = spinAngle;
+        lastSunUpdate = now;
+      }
+    }
+    if (destination === "station") {
+      bounce.visible = detailedLighting;
+      ambient.intensity = isCutaway ? 1.05 : THREE.MathUtils.lerp(0.59, 1.05, habitatLight);
+      sun.intensity = THREE.MathUtils.lerp(3.35, 0.48, habitatLight);
+      bounce.intensity = THREE.MathUtils.lerp(0.82, 0.34, habitatLight);
+      interior.intensity = isCutaway ? 20 : THREE.MathUtils.lerp(11, 20, habitatLight);
+      daylight.intensity = 1.42 * habitatLight;
+      const extent = view === "ground" ? 0.28 : 1.19;
+      const shadow = daylight.shadow.camera;
+      if (shadow.right !== extent) {
+        shadow.left = shadow.bottom = -extent;
+        shadow.right = shadow.top = extent;
+        shadow.updateProjectionMatrix();
+        daylight.shadow.needsUpdate = true;
+      }
+      const cityShadows = inside && detailedLighting;
+      if (cityShadows !== daylight.castShadow) {
+        daylight.castShadow = cityShadows;
+        station.city.setShadowCasting(cityShadows);
+        daylight.shadow.needsUpdate = cityShadows;
+      }
+      if (cityShadows && !daylight.shadow.needsUpdate && spinAngle !== lastDaylightAngle) {
+        // The city and its light rotate together, so only the projection moves.
+        daylight.updateWorldMatrix(true, false);
+        daylight.target.updateWorldMatrix(true, false);
+        daylight.shadow.updateMatrices(daylight);
+      }
+      lastDaylightAngle = spinAngle;
+    } else {
+      bounce.visible = true;
+      ambient.intensity = 1.3;
+      sun.intensity = 3.22;
+      bounce.intensity = 1.04;
+    }
     sky.mesh.position.copy(camera.position);
     const sunApproach = 1 - THREE.MathUtils.smoothstep(
       Math.abs(travelProgress - sunStop),
@@ -621,7 +801,9 @@ export function startFlight({
         ? 0.13
         : destination === "blackhole"
           ? 0.2
-          : THREE.MathUtils.lerp(0.31, 0.065, sunApproach),
+          : destination === "station"
+            ? 0.17
+            : THREE.MathUtils.lerp(0.31, 0.065, sunApproach),
     );
     stars.mesh.position.copy(camera.position);
     stars.mesh.visible = !inside;
@@ -685,6 +867,8 @@ export function startFlight({
   });
   document.addEventListener("visibilitychange", () => {
     keys.clear();
+    last = performance.now();
+    previousDraw = slowFrames = fastFrames = 0;
     dirty = true;
   });
   host.addEventListener("pointerdown", (event) => {
@@ -785,6 +969,15 @@ export function startFlight({
     onGraphics(false);
   });
   renderer.domElement.addEventListener("webglcontextrestored", () => {
+    lastSunAngle = Infinity;
+    lastSunUpdate = -Infinity;
+    daylight.shadow.needsUpdate = true;
+    reflection?.dispose();
+    reflection = undefined;
+    if (destination === "station") {
+      reflection = stationReflections(renderer);
+      scene.environment = reflection.texture;
+    }
     available = true;
     dirty = true;
     onGraphics(true);

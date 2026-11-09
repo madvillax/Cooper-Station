@@ -4,6 +4,7 @@ import { RIM_RADIUS_METERS } from "./physics";
 export const RADIUS = RIM_RADIUS_METERS / 1000;
 export const HALF_LENGTH = 6.1;
 export const TAU = Math.PI * 2;
+export const WATER_LEVEL = 0.034;
 const ANGLE_OFFSET = -Math.PI * 1.5;
 
 const CITY_CENTER_U = 0.455;
@@ -13,6 +14,13 @@ export const CITY_HALF_WIDTH = 0.71;
 export const CITY_HALF_LENGTH = 1.02;
 export const CITY_LANDING = { x: 0, z: 0.78 };
 export const CITY_DECK = 0.0012;
+export type CityFootprint = {
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+};
+const cityAxis = new THREE.Vector3(0, 0, 1);
 
 export function citySurface(x: number, z: number) {
   return {
@@ -33,6 +41,13 @@ export function cityPoint(x: number, z: number, height = CITY_DECK) {
   return terrainPoint(u, v, height);
 }
 
+export function cityRotation(x: number) {
+  return new THREE.Quaternion().setFromAxisAngle(
+    cityAxis,
+    surfaceAngle(citySurface(x, 0).u) + Math.PI / 2,
+  );
+}
+
 export function surfaceAngle(u: number) {
   return u * TAU + ANGLE_OFFSET;
 }
@@ -41,14 +56,25 @@ export function riverCenter(v: number) {
   return 0.53 + Math.sin(v * 10 + 0.3) * 0.029 + Math.sin(v * 20 - 1.9) * 0.014;
 }
 
+export function riverWidth(v: number) {
+  return 0.0096 + 0.0023 * Math.sin(v * 16 + 0.4) + 0.0014 * Math.sin(v * 31);
+}
+
 export function terrainHeight(u: number, v: number) {
-  const hills = (Math.sin(u * TAU * 3 + 1.2) * 0.5 + 0.5) ** 3;
-  const rolling =
-    Math.sin(v * 19 - u * TAU * 4) * Math.sin(v * 13 + u * TAU * 5);
-  const bank = Math.min(Math.abs(u - riverCenter(v)) * 30, 1);
-  const naturalHeight =
-    (0.03 + hills * (0.29 + rolling * 0.17)) * bank +
-    0.022 * Math.sin(u * TAU * 14 + v * 29) * bank;
+  const angle = u * TAU;
+  const ridge = 0.5 + 0.5 * Math.sin(angle * 3 + 0.75 * Math.sin(v * 8) + 1.2);
+  const rolling = Math.sin(v * 16 - angle * 4) * Math.cos(v * 11 + angle * 5);
+  const ridges = Math.sin(angle * 13 + v * 30) * Math.cos(angle * 9 - v * 24);
+  const upland =
+    0.062 + ridge ** 2.7 * (0.32 + 0.11 * rolling) + 0.028 * ridges;
+  const bank = Math.abs(u - riverCenter(v)) / riverWidth(v);
+  const riverBed =
+    WATER_LEVEL - 0.04 + 0.1 * THREE.MathUtils.smoothstep(bank, 0.68, 1.65);
+  const naturalHeight = THREE.MathUtils.lerp(
+    riverBed,
+    upland,
+    THREE.MathUtils.smoothstep(bank, 1.22, 3.4),
+  );
   const x = Math.abs((u - CITY_CENTER_U) * RADIUS * TAU);
   const z = Math.abs((v - CITY_CENTER_V) * HALF_LENGTH * 2);
   const urban =

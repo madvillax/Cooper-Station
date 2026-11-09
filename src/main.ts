@@ -1,5 +1,3 @@
-import "@fontsource-variable/space-grotesk/wght.css";
-import "@fontsource/ibm-plex-mono/latin-400.css";
 import arrow from "@tabler/icons/outline/arrow-up-right.svg?raw";
 import back from "@tabler/icons/outline/arrow-left.svg?raw";
 import close from "@tabler/icons/outline/x.svg?raw";

@@ -11,53 +11,60 @@ import {
   CITY_HALF_WIDTH,
   CITY_LANDING,
   cityPoint,
-  citySurface,
-  surfaceAngle,
+  cityRotation,
+  type CityFootprint,
 } from "./habitat-surface";
+import { makePromenade } from "./habitat-promenade";
 
-type Footprint = { x: number; z: number; width: number; depth: number };
-type Tower = Footprint & { height: number; tier: number };
-const axis = new THREE.Vector3(0, 0, 1);
+type Tower = CityFootprint & { height: number; tier: number };
 const towerRows = [-0.85, -0.59, -0.31, -0.02, 0.26, 0.51, 0.81];
 const towerColumns = [-0.57, -0.44, -0.23, -0.12, 0.12, 0.23, 0.44, 0.57];
 
-function rotationAt(x: number) {
-  return new THREE.Quaternion().setFromAxisAngle(
-    axis,
-    surfaceAngle(citySurface(x, 0).u) + Math.PI / 2,
-  );
-}
-
-function facadeTexture() {
+function facadeTexture(residential: boolean) {
   return canvasTexture(256, 512, (ctx) => {
-    const random = seededRandom(4528);
-    const sky = ctx.createLinearGradient(0, 0, 0, 512);
-    sky.addColorStop(0, "#7d9db4");
-    sky.addColorStop(0.48, "#314b66");
-    sky.addColorStop(1, "#101e31");
-    ctx.fillStyle = sky;
+    const random = seededRandom(residential ? 8831 : 4528);
+    const curtain = ctx.createLinearGradient(0, 0, 256, 512);
+    curtain.addColorStop(0, residential ? "#9da5a0" : "#78888c");
+    curtain.addColorStop(0.54, residential ? "#767f79" : "#435b60");
+    curtain.addColorStop(1, residential ? "#565f5a" : "#263a40");
+    ctx.fillStyle = curtain;
     ctx.fillRect(0, 0, 256, 512);
-    for (let floor = 0; floor < 32; floor++) {
-      for (let bay = 0; bay < 12; bay++) {
-        const x = bay * 21.33;
-        const y = floor * 16;
-        const light = random();
+    const levels = residential ? 17 : 28;
+    const columns = residential ? 9 : 13;
+    const story = 512 / levels;
+    const bay = 256 / columns;
+    for (let row = 0; row < levels; row++) {
+      for (let col = 0; col < columns; col++) {
+        const x = col * bay;
+        const y = row * story;
+        const shade = random();
         ctx.fillStyle =
-          light > 0.92 ? "#e5c496" : light > 0.73 ? "#7da6ba" : "#15284042";
-        ctx.fillRect(x + 1.5, y + 1.5, 18.4, 11.7);
-        ctx.fillStyle = "#d1edff36";
-        ctx.fillRect(x + 1.5, y + 1.5, 18.4, 1);
-        ctx.fillStyle = "#1b2b40";
-        ctx.fillRect(x, y + 13.5, 21.4, 2.5);
+          shade > 0.93 ? "#b9a47b" : shade > 0.74 ? "#8b9d9c" : "#1e353a85";
+        ctx.fillRect(x + 2, y + 2, bay - 4, story * 0.72);
+        ctx.fillStyle = "#c5d3cc38";
+        ctx.fillRect(x + 2, y + 3, bay - 4, 1);
+        ctx.fillStyle = "#16282c91";
+        ctx.fillRect(x + 2, y + story * 0.72, bay - 4, 2);
+        if (shade > 0.79) {
+          ctx.fillStyle = "#d9d8c350";
+          ctx.fillRect(x + 3, y + 4, bay * 0.35, story * 0.5);
+        }
       }
+      ctx.fillStyle = residential ? "#90978c" : "#33484b";
+      ctx.fillRect(
+        0,
+        (row + 1) * story - (residential ? 3 : 2),
+        256,
+        residential ? 3 : 2,
+      );
     }
-    ctx.fillStyle = "#d4e3ec";
-    for (const x of [1, 84, 170, 252]) ctx.fillRect(x, 0, 2, 512);
+    ctx.fillStyle = residential ? "#a8aaa0" : "#a0aeaa";
+    for (const x of [0, 84, 169, 254]) ctx.fillRect(x, 0, 2, 512);
   });
 }
 
 function deckTexture() {
-  return canvasTexture(1536, 2048, (ctx) => {
+  return canvasTexture(2048, 2560, (ctx) => {
     const { width, height } = ctx.canvas;
     const px = (x: number) => (x / (2 * CITY_HALF_WIDTH) + 0.5) * width;
     const py = (z: number) => (0.5 - z / (2 * CITY_HALF_LENGTH)) * height;
@@ -72,33 +79,47 @@ function deckTexture() {
       ctx.fillRect(px(x - w / 2), py(z + d / 2), px(w) - px(0), py(0) - py(d));
     };
 
-    ctx.fillStyle = "#43525b";
+    ctx.fillStyle = "#817e70";
     ctx.fillRect(0, 0, width, height);
     const random = seededRandom(390);
-    for (let y = 0; y < height; y += 20) {
-      for (let x = 0; x < width; x += 21) {
-        ctx.fillStyle = random() < 0.29 ? "#8795a025" : "#15232e26";
-        ctx.fillRect(x + 1, y + 1, 19, 18);
+    for (let y = 0; y < height; y += 31) {
+      for (let x = 0; x < width; x += 30) {
+        ctx.fillStyle = random() < 0.39 ? "#ada89920" : "#555c5026";
+        ctx.fillRect(x + 1, y + 1, 29, 30);
       }
     }
     for (const z of [-0.98, -0.72, -0.45, -0.165, 0.12, 0.39, 0.66, 0.96]) {
-      rectangle(0, z, 1.42, 0.038, "#222c34");
+      rectangle(0, z, 1.42, 0.048, "#a4a090");
+      rectangle(0, z, 1.42, 0.037, "#3d4240");
       for (let x = -0.66; x < 0.67; x += 0.038)
-        rectangle(x, z, 0.015, 0.0015, "#a7aa99");
+        rectangle(x, z, 0.015, 0.0013, "#a49c7d");
     }
     for (const x of [-0.66, -0.34, 0.34, 0.66]) {
-      rectangle(x, 0, 0.042, 2.04, "#222e36");
-      for (const offset of [-0.024, 0.024])
-        rectangle(x + offset, 0, 0.002, 2.04, "#7797a4");
+      rectangle(x, 0, 0.053, 2.04, "#a4a090");
+      rectangle(x, 0, 0.037, 2.04, "#3d4240");
+      for (let z = -0.96; z < 1; z += 0.022)
+        rectangle(x, z, 0.0012, 0.009, "#979274");
     }
-    rectangle(0, 0, 0.11, 2.04, "#929797");
-    rectangle(0, 0, 0.078, 2.04, "#777f81");
-    rectangle(0, 0.79, 0.213, 0.26, "#8e9da2");
-    rectangle(0, 0.79, 0.152, 0.222, "#697d89");
-    for (const edge of [-0.045, 0.045])
-      rectangle(edge, 0, 0.002, 2.01, "#a5d7d6");
-    for (let z = -0.96; z < 1.01; z += 0.013)
-      rectangle(0, z, 0.077, 0.00085, "#b3c2bd55");
+    rectangle(0, 0.16, 0.071, 1.72, "#a09e8f");
+    rectangle(0, CITY_LANDING.z, 0.216, 0.224, "#a09e8f");
+    for (const side of [-1, 1]) {
+      rectangle(side * 0.0157, 0.155, 0.0054, 1.72, "#626d64");
+      rectangle(side * 0.013, 0.155, 0.00072, 1.72, "#bbb7a6");
+      rectangle(side * 0.026, 0.152, 0.0065, 1.71, "#777b6c");
+      for (const z of [0.41, 0.23, 0.049, -0.28, -0.55]) {
+        rectangle(side * 0.068, z, 0.042, 0.058, "#536b4d");
+        rectangle(side * 0.068, z, 0.004, 0.056, "#a7a48c");
+      }
+    }
+    for (let i = 0; i < 34000; i++) {
+      ctx.fillStyle = i % 2 === 0 ? "#e2d7bc16" : "#1e2b281c";
+      ctx.fillRect(
+        random() * width,
+        random() * height,
+        0.55 + random() * 2.6,
+        0.7 + random() * 1.8,
+      );
+    }
   });
 }
 
@@ -135,50 +156,59 @@ function makeDeck() {
   const map = deckTexture();
   const material = new THREE.MeshStandardMaterial({
     map,
-    roughness: 0.81,
-    emissiveMap: map,
-    emissive: 0x8ba2b1,
-    emissiveIntensity: 0.23,
+    roughness: 0.86,
   });
   material.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <map_fragment>",
       `#include <map_fragment>
-        vec2 tiles = vMapUv * vec2(710.0, 1020.0);
+        vec2 tiles = vMapUv * vec2(1270.0, 1280.0);
+        tiles.x += mod(floor(tiles.y), 2.0) * 0.5;
         vec2 edges = abs(fract(tiles - 0.5) - 0.5);
         vec2 footprint = fwidth(tiles);
-        vec2 joints = 1.0 - smoothstep(vec2(0.015), vec2(0.015) + max(footprint, 0.005), edges);
-        float detail = 1.0 - smoothstep(0.32, 0.95, max(footprint.x, footprint.y));
+        vec2 joints = 1.0 - smoothstep(vec2(0.007), vec2(0.007) + max(footprint, 0.005), edges);
+        float detail = 1.0 - smoothstep(0.22, 0.79, max(footprint.x, footprint.y));
         float slab = fract(sin(dot(floor(tiles), vec2(12.9898, 78.233))) * 43758.5453);
-        diffuseColor.rgb *= 1.0 + detail * (slab * 0.10 - 0.05 - 0.24 * max(joints.x, joints.y));`,
+        float mottling = sin(vMapUv.x * 7610.0 - cos(vMapUv.y * 6320.0))
+          * cos(vMapUv.y * 12600.0 + vMapUv.x * 3180.0);
+        vec2 grit = vMapUv * vec2(87000.0, 126000.0);
+        float gritFade = 1.0 - smoothstep(0.2, 1.65, max(fwidth(grit.x), fwidth(grit.y)));
+        float aggregate = fract(sin(dot(floor(grit), vec2(13.43, 79.55))) * 47386.563);
+        diffuseColor.rgb *= 1.0 + detail * (slab * 0.13 - 0.065 + mottling * 0.08
+          - 0.24 * max(joints.x, joints.y)) + gritFade * (aggregate - 0.5) * 0.17;`,
     );
   };
-  return new THREE.Mesh(geometry, material);
+  const deck = new THREE.Mesh(geometry, material);
+  deck.receiveShadow = true;
+  return deck;
 }
 
 export function makeHabitatCity() {
   const group = new THREE.Group();
   const random = seededRandom(12901);
-  const blockers: Footprint[] = [];
+  const promenade = makePromenade();
+  const blockers = promenade.blockers;
   const structure: Detail[] = [];
   const glass: Detail[] = [];
+  const residential: Detail[] = [];
   const lights: Detail[] = [];
   const gardens: Detail[] = [];
   const box = new THREE.BoxGeometry();
   const shell = new THREE.MeshStandardMaterial({
-    roughness: 0.46,
-    metalness: 0.29,
-    emissive: 0x202e3d,
-    emissiveIntensity: 0.41,
+    roughness: 0.56,
+    metalness: 0.25,
   });
-  const facade = facadeTexture();
   const glazing = new THREE.MeshStandardMaterial({
-    map: facade,
-    emissiveMap: facade,
-    emissive: 0x87a9bd,
-    emissiveIntensity: 0.4,
+    map: facadeTexture(false),
+    emissive: 0x253535,
+    emissiveIntensity: 0.26,
     roughness: 0.29,
-    metalness: 0.35,
+    metalness: 0.37,
+  });
+  const masonry = new THREE.MeshStandardMaterial({
+    map: facadeTexture(true),
+    roughness: 0.67,
+    metalness: 0.08,
   });
   const glow = new THREE.MeshBasicMaterial({ toneMapped: false });
   const vegetation = new THREE.MeshStandardMaterial({
@@ -199,98 +229,132 @@ export function makeHabitatCity() {
   ) {
     batch.push({
       position: cityPoint(x, z, CITY_DECK + elevation + h / 2),
-      rotation: rotationAt(x),
+      rotation: cityRotation(x),
       scale: new THREE.Vector3(w, h, d),
       color: new THREE.Color(color),
     });
   }
 
   function buildTower({ x, z, width, depth, height, tier }: Tower) {
-    const base = 0.007;
-    blockers.push({ x, z, width: width * 1.09, depth: depth * 1.11 });
-    part(structure, x, z, 0, width * 1.09, base, depth * 1.11, 0x738291);
+    const apartments = random() < 0.46;
+    const setback = tier === 2 || (!apartments && random() > 0.53);
+    const base = 0.008 + random() * 0.007;
+    const wall = apartments ? residential : glass;
+    const trim = apartments ? 0xa39b88 : 0x82918e;
+    const podium = apartments ? 0x969184 : 0x6f7a75;
+    blockers.push({ x, z, width: width * 1.14, depth: depth * 1.14 });
+    part(structure, x, z, 0, width * 1.14, base, depth * 1.14, podium);
     part(
-      glass,
+      wall,
+      x,
+      z,
+      base * 0.28,
+      width * 1.02,
+      base * 0.57,
+      depth * 1.15,
+      0xa6aea4,
+    );
+
+    const main = height * (setback ? 0.69 : 1);
+    part(
+      wall,
       x,
       z,
       base,
       width,
-      height * 0.69,
+      main,
       depth,
-      tier === 0 ? 0xa6c3d1 : 0x90b2ca,
+      apartments ? 0xb4aa96 : 0xa1b6ba,
     );
     part(
       structure,
       x,
       z,
-      base + height * 0.69,
-      width * 1.03,
-      0.0035,
-      depth * 1.03,
-      0xbac9ce,
+      base + main,
+      width * 1.015,
+      0.0027,
+      depth * 1.028,
+      trim,
     );
-    part(
-      glass,
-      x,
-      z - depth * 0.12,
-      base + height * 0.69,
-      width * 0.72,
-      height * 0.31,
-      depth * 0.72,
-      0xa6c0d5,
-    );
-    part(
-      structure,
-      x,
-      z - depth * 0.12,
-      base + height,
-      width * 0.79,
-      0.0045,
-      depth * 0.76,
-      0xc3cbd2,
-    );
-    for (const direction of [-1, 1]) {
+    if (setback) {
+      const inset = apartments ? 0.78 : 0.69;
       part(
-        structure,
-        x + direction * width * 0.48,
-        z,
-        base,
-        0.003,
-        height * 0.69,
-        depth * 1.03,
-        0xb8c7d1,
+        wall,
+        x,
+        z - depth * 0.065,
+        base + main,
+        width * inset,
+        height - main,
+        depth * 0.76,
+        apartments ? 0xada596 : 0x9caeb0,
       );
       part(
-        lights,
-        x + direction * width * 0.43,
-        z + depth * 0.503,
-        base + height * 0.1,
-        0.0008,
-        height * 0.55,
-        0.0009,
-        0x87c9e4,
+        structure,
+        x,
+        z - depth * 0.065,
+        base + height,
+        width * (inset + 0.045),
+        0.0029,
+        depth * 0.8,
+        trim,
       );
     }
-    if (tier > 1) {
+    for (const side of [-1, 1]) {
+      part(
+        structure,
+        x + side * width * 0.47,
+        z,
+        base,
+        apartments ? 0.0032 : 0.0019,
+        main,
+        depth * 1.013,
+        trim,
+      );
+      part(
+        structure,
+        x + side * width * 0.158,
+        z - depth * 0.104,
+        base + height + 0.002,
+        width * 0.155,
+        0.004 + random() * 0.003,
+        depth * 0.26,
+        podium,
+      );
+      if (apartments) {
+        for (const level of [0.24, 0.53, 0.77]) {
+          part(
+            structure,
+            x,
+            z + side * depth * 0.49,
+            base + main * level,
+            width * 0.89,
+            0.00125,
+            depth * 0.13,
+            0xa6a293,
+          );
+        }
+      }
+    }
+    if (tier === 2 && height > 0.11) {
       part(
         structure,
         x,
-        z - depth * 0.12,
-        height + base,
-        0.005,
-        height * 0.24,
-        0.006,
-        0x8c9ead,
+        z,
+        base + height + 0.004,
+        0.0032,
+        height * 0.13,
+        0.0035,
+        0x84938c,
       );
       part(
         lights,
         x,
-        z - depth * 0.12,
-        height * 1.24 + base,
-        0.004,
-        0.003,
-        0.004,
-        0xffaa78,
+        z,
+        base + height * 1.13 + 0.004,
+        0.002,
+        0.0016,
+        0.002,
+        0xe39368,
       );
     }
   }
@@ -302,92 +366,44 @@ export function makeHabitatCity() {
       buildTower({
         x: x + (random() - 0.5) * 0.025,
         z: z + (random() - 0.5) * 0.064,
-        width: 0.05 + random() * 0.035,
-        depth: 0.055 + random() * 0.055,
-        height: 0.031 + random() * (tier === 2 ? 0.139 : 0.088),
+        width: 0.034 + random() * 0.066,
+        depth: 0.038 + random() * 0.079,
+        height: 0.019 + random() ** 1.55 * (tier === 2 ? 0.154 : 0.105),
         tier,
       });
     }
   }
 
-  // The promenade stays clear for walking from the landing plaza.
-  for (const x of [-0.064, 0.064]) {
-    buildTower({
-      x,
-      z: 0.58,
-      width: 0.038,
-      depth: 0.048,
-      height: 0.083,
-      tier: 2,
-    });
-    part(structure, x, 0.7, 0, 0.023, 0.002, 0.064, 0xa1b2b3);
-    for (const z of [0.682, 0.701, 0.72]) {
-      part(gardens, x, z, 0.002, 0.016, 0.012, 0.015, 0x477966);
-    }
-  }
-
-  for (const x of [-0.018, 0.018]) {
-    for (let z = 0.52; z < 0.95; z += 0.019) {
-      part(structure, x, z, 0, 0.0011, 0.0014, 0.0011, 0x374750);
-      part(lights, x, z, 0.0014, 0.00095, 0.0004, 0.00095, 0xc7eaf8);
-    }
-  }
-  for (const z of [0.26, -0.29, -0.59]) {
-    part(structure, 0, z, 0.026, 0.21, 0.005, 0.026, 0x7e97aa);
-    part(glass, 0, z, 0.031, 0.201, 0.009, 0.024, 0x7e9aaa);
-    part(lights, 0, z + 0.013, 0.028, 0.203, 0.001, 0.001, 0xa1e4f8);
-  }
-
-  for (const x of [-0.011, 0.011]) {
-    part(lights, x, 0.787, 0.00009, 0.00021, 0.00007, 0.17, 0x9ecbdb);
-  }
-  const arch = new THREE.TorusGeometry(
-    0.032,
-    0.0023,
-    10,
-    60,
-    (Math.PI * 5) / 3,
-  ).rotateZ((Math.PI * 5) / 3);
-  const gateway = new THREE.Mesh(arch, shell);
-  gateway.position.copy(cityPoint(0, 0.666, CITY_DECK + 0.028));
-  gateway.quaternion.copy(rotationAt(0));
-  group.add(gateway);
-  const gatewayLight = new THREE.Mesh(
-    new THREE.TorusGeometry(0.03, 0.00052, 6, 60, (Math.PI * 5) / 3).rotateZ(
-      (Math.PI * 5) / 3,
-    ),
-    new THREE.MeshBasicMaterial({ color: 0xa9ddeb, toneMapped: false }),
-  );
-  gatewayLight.position.copy(gateway.position);
-  gatewayLight.position.z += 0.0022;
-  gatewayLight.quaternion.copy(gateway.quaternion);
-  group.add(gatewayLight);
-
-  const signMap = canvasTexture(512, 128, (ctx) => {
-    ctx.fillStyle = "#142839";
-    ctx.fillRect(0, 0, 512, 128);
-    ctx.strokeStyle = "#9ed2d8";
-    ctx.lineWidth = 3;
-    ctx.strokeRect(4, 4, 504, 120);
-    ctx.fillStyle = "#def1ed";
-    ctx.font = "bold 43px monospace";
-    ctx.fillText("COOPER CITY", 28, 56);
-    ctx.fillStyle = "#9ac8cc";
-    ctx.font = "23px monospace";
-    ctx.fillText("ARRIVALS  /  PROMENADE", 30, 99);
+  buildTower({
+    x: -0.058,
+    z: 0.575,
+    width: 0.038,
+    depth: 0.072,
+    height: 0.076,
+    tier: 2,
   });
-  const sign = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.027, 0.00675),
-    new THREE.MeshBasicMaterial({ map: signMap, side: THREE.DoubleSide }),
-  );
-  sign.position.copy(cityPoint(0, 0.666, CITY_DECK + 0.046));
-  sign.position.z += 0.003;
-  sign.quaternion.copy(rotationAt(0));
-  group.add(sign);
-  for (const x of [-0.016, 0.016]) {
-    part(structure, x, 0.666, 0, 0.005, 0.004, 0.007, 0x8ea2ad);
-    part(structure, x * 0.63, 0.668, 0.048, 0.0005, 0.012, 0.0005, 0x9babb4);
-    blockers.push({ x, z: 0.666, width: 0.005, depth: 0.007 });
+  buildTower({
+    x: 0.069,
+    z: 0.54,
+    width: 0.055,
+    depth: 0.061,
+    height: 0.112,
+    tier: 2,
+  });
+  for (const z of [0.26, -0.29, -0.59]) {
+    part(structure, 0, z, 0.026, 0.214, 0.004, 0.024, 0x8c9187);
+    part(glass, 0, z, 0.029, 0.206, 0.008, 0.023, 0x879997);
+    part(structure, 0, z, 0.037, 0.212, 0.0011, 0.0246, 0x909d96);
+  }
+  for (const x of [-0.068, 0.068]) {
+    for (const z of [0.41, 0.23, 0.049, -0.28, -0.55]) {
+      for (let tree = 0; tree < 9; tree++) {
+        const tx = x + (random() - 0.5) * 0.032;
+        const tz = z + (random() - 0.5) * 0.047;
+        const h = 0.003 + random() * 0.005;
+        part(gardens, tx, tz, 0.0018, h * 0.63, h, h * 0.57, 0x416544);
+      }
+    }
   }
 
   const domeGeometry = new THREE.SphereGeometry(
@@ -400,22 +416,36 @@ export function makeHabitatCity() {
     Math.PI / 2,
   );
   const domeMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x759aaf,
-    emissive: 0x537f88,
-    emissiveIntensity: 0.35,
-    opacity: 0.58,
+    color: 0x90a6a0,
+    opacity: 0.46,
     transparent: true,
     depthWrite: false,
     metalness: 0.23,
     roughness: 0.27,
+    clearcoat: 0.44,
   });
+  const roofRib = new THREE.TorusGeometry(1, 0.012, 6, 32, Math.PI);
   for (const x of [-0.185, 0.185]) {
     const z = 0.76;
     const dome = new THREE.Mesh(domeGeometry, domeMaterial);
     dome.scale.set(0.054, 0.035, 0.058);
     dome.position.copy(cityPoint(x, z, CITY_DECK + 0.002));
-    dome.quaternion.copy(rotationAt(x));
+    dome.quaternion.copy(cityRotation(x));
     group.add(dome);
+    for (let i = 0; i < 8; i++) {
+      const rib = new THREE.Mesh(roofRib, shell);
+      rib.scale.set(0.0546, 0.0353, 0.058);
+      rib.position.copy(dome.position);
+      rib.quaternion
+        .copy(dome.quaternion)
+        .multiply(
+          new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(0, 1, 0),
+            (i * Math.PI) / 8,
+          ),
+        );
+      group.add(rib);
+    }
     blockers.push({ x, z, width: 0.112, depth: 0.12 });
     part(structure, x, z, 0, 0.112, 0.002, 0.12, 0x859baa);
     for (const offset of [-0.022, 0, 0.022]) {
@@ -450,18 +480,29 @@ export function makeHabitatCity() {
       cabin.position.y = 0.002;
       train.add(carriage, cabin);
     }
-    train.quaternion.copy(rotationAt(x));
-    group.add(train);
+    train.quaternion.copy(cityRotation(x));
     trains.push(train);
   }
 
   group.add(
-    makeDeck(),
+    promenade.group,
     instances(box, shell, structure),
     instances(box, glazing, glass),
+    instances(box, masonry, residential),
     instances(box, glow, lights),
     instances(new THREE.IcosahedronGeometry(1, 1), vegetation, gardens),
   );
+  const shadowCasters: THREE.Mesh[] = [];
+  group.traverse((object) => {
+    if (
+      !(object instanceof THREE.Mesh) ||
+      !(object.material instanceof THREE.MeshStandardMaterial)
+    )
+      return;
+    if (!object.material.transparent) shadowCasters.push(object);
+    object.receiveShadow = true;
+  });
+  group.add(makeDeck(), ...trains);
 
   function update(seconds: number) {
     trains.forEach((train, index) => {
@@ -488,5 +529,12 @@ export function makeHabitatCity() {
   }
 
   update(0);
-  return { group, update, canWalk };
+  return {
+    group,
+    update,
+    canWalk,
+    setShadowCasting(enabled: boolean) {
+      for (const mesh of shadowCasters) mesh.castShadow = enabled;
+    },
+  };
 }
