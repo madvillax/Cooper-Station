@@ -108,10 +108,12 @@ a {
 }
 .launch-content h1 {
   margin: 0;
-  font-size: clamp(2.15rem, 5.8vw, 5rem);
-  font-weight: 510;
-  line-height: 1.03;
-  letter-spacing: -0.064em;
+  font-family: var(--control-font);
+  font-size: clamp(1.65rem, 5.25vw, 4.5rem);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   text-wrap: balance;
   text-shadow: 0 3px 28px #02050dbf;
 }
