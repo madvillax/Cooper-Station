@@ -24,138 +24,237 @@ export function canvasTexture(
   return texture;
 }
 
-export function createSpace() {
-  const space = new THREE.Group();
-  const random = seededRandom(1836);
-  const stars = new THREE.BufferGeometry();
+export function makeStarField() {
+  const random = seededRandom(618);
   const positions = [];
-  const sizes = [];
-  const colors = [];
-  const starColor = new THREE.Color();
-  for (let i = 0; i < 4600; i++) {
-    const z = random() * 2 - 1;
-    const a = random() * Math.PI * 2;
-    const side = Math.sqrt(1 - z * z);
-    const radius = 180 + random() * 30;
-    positions.push(radius * side * Math.cos(a), radius * z, radius * side * Math.sin(a));
-    const brightness = 0.1 + random() ** 4 * 0.67;
-    sizes.push((0.75 + brightness * 1.85) * Math.min(window.devicePixelRatio, 1.7));
-    starColor.setHSL(0.04 + random() * 0.6, 0.22, brightness);
-    colors.push(starColor.r, starColor.g, starColor.b);
+  const brightness = [];
+  for (let i = 0; i < 5800; i++) {
+    const y = random() * 2 - 1;
+    const azimuth = random() * Math.PI * 2;
+    const plane = Math.sqrt(1 - y * y);
+    positions.push(
+      Math.cos(azimuth) * plane * 320,
+      y * 320,
+      Math.sin(azimuth) * plane * 320,
+    );
+    brightness.push(0.22 + random() ** 5 * 0.76);
   }
-  stars.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  stars.setAttribute("size", new THREE.Float32BufferAttribute(sizes, 1));
-  stars.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-  const starMaterial = new THREE.ShaderMaterial({
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
+  geometry.setAttribute(
+    "brightness",
+    new THREE.Float32BufferAttribute(brightness, 1),
+  );
+  const material = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
+    uniforms: { density: { value: 1 } },
     vertexShader: `
-      attribute float size;
-      attribute vec3 color;
-      varying vec3 tint;
+      attribute float brightness;
+      varying float energy;
+      uniform float density;
       void main() {
-        tint = color;
-        gl_PointSize = size;
+        energy = brightness;
+        gl_PointSize = (1.15 + 1.7 * brightness) * density;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: `
-      varying vec3 tint;
+      varying float energy;
       void main() {
-        float glow = max(1.0 - length(gl_PointCoord - 0.5) * 2.0, 0.0);
-        gl_FragColor = vec4(tint, glow * glow);
+        float r = length(gl_PointCoord - 0.5) * 2.0;
+        float point = exp(-r * r * 5.0) * (1.0 - smoothstep(0.7, 1.0, r));
+        gl_FragColor = vec4(mix(vec3(0.60, 0.71, 1.0), vec3(1.0, 0.88, 0.68), energy), energy * point);
+      }
+    `,
+  });
+  const mesh = new THREE.Points(geometry, material);
+  mesh.frustumCulled = false;
+  return {
+    mesh,
+    setDensity(ratio: number) {
+      material.uniforms.density.value = ratio;
+    },
+  };
+}
+
+export function makeSolarCorona() {
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: { time: { value: 0 } },
+    vertexShader: `
+      varying vec2 field;
+      void main() {
+        field = position.xy;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float time;
+      varying vec2 field;
+
+      float hash(vec2 p) {
+        vec3 v = fract(vec3(p.xyx) * 0.1031);
+        v += dot(v, v.yzx + 33.33);
+        return fract((v.x + v.y) * v.z);
+      }
+
+      float noise(vec2 p) {
+        vec2 cell = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(hash(cell), hash(cell + vec2(1.0, 0.0)), f.x),
+          mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), f.x),
+          f.y
+        );
+      }
+
+      float prominence(vec2 radial, float height, float angle, float width, float rise) {
+        vec2 anchor = vec2(cos(angle), sin(angle));
+        if (dot(radial, anchor) < 0.92) return 0.0;
+        float across = dot(radial, vec2(-anchor.y, anchor.x)) / width;
+        float arc = rise * sqrt(max(0.0, 1.0 - across * across));
+        float distance = abs(height - arc);
+        return (exp(-distance * 190.0) + 0.32 * exp(-distance * 58.0))
+          * (1.0 - smoothstep(0.84, 1.0, abs(across)));
+      }
+
+      void main() {
+        float radius = length(field);
+        float pixel = fwidth(radius);
+        if (radius < 1.0 - pixel || radius > 1.47) discard;
+        vec2 radial = field / radius;
+        vec2 tangent = vec2(-radial.y, radial.x);
+        float altitude = max(radius - 1.0, 0.0);
+        float drift = time * 0.12;
+        float activity = smoothstep(0.15, 0.85, noise(radial * 8.0 + vec2(13.4, -5.0)));
+        float bend = noise(radial * 15.0 + vec2(altitude * 17.0 - drift, drift * 0.5));
+        vec2 flow = radial * (39.0 + altitude * 17.0)
+          + tangent * altitude * (25.0 * bend - 12.0);
+        float structure = noise(flow + vec2(drift, -drift * 0.46));
+        float scaleHeight = 0.021 + 0.092 * activity;
+        float glow = (0.08 + activity * 0.11) * exp(-altitude * 15.0);
+        float wisps = pow(structure, 2.4) * (0.34 + activity * 0.52)
+          * exp(-altitude / scaleHeight);
+        float lifted = altitude + (bend - 0.5) * 0.008;
+        float loops = prominence(radial, lifted, 5.62, 0.13, 0.142)
+          + 0.74 * prominence(radial, lifted, 3.91, 0.091, 0.087)
+          + 0.50 * prominence(radial, lifted, 1.09, 0.071, 0.072);
+        float rim = exp(-altitude * 170.0) * (0.45 + structure * 0.12);
+        float edge = smoothstep(-pixel, pixel, radius - 1.0);
+        float fade = 1.0 - smoothstep(1.22, 1.46, radius);
+        vec3 tint = mix(vec3(1.0, 0.012, 0.001), vec3(1.0, 0.37, 0.017), exp(-altitude * 35.0));
+        gl_FragColor = vec4(tint, (rim + glow + wisps + loops * 0.26) * edge * fade);
         #include <colorspace_fragment>
       }
     `,
   });
-  space.add(new THREE.Points(stars, starMaterial));
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.96, 2.96), material);
+  mesh.renderOrder = 1;
+  return {
+    mesh,
+    update(camera: THREE.Camera, time: number, center: THREE.Vector3, radius: number) {
+      const distance = Math.max(
+        1.05,
+        camera.position.distanceTo(center) / radius,
+      );
+      // At close range, the apparent limb is wider than the sphere's equator.
+      mesh.scale.setScalar(distance / Math.sqrt(distance * distance - 1));
+      mesh.lookAt(camera.position);
+      material.uniforms.time.value = time;
+    },
+  };
+}
 
-  const saturn = new THREE.Group();
-  saturn.position.set(25, 12.5, -64);
-  saturn.rotation.set(0.13, 0, -0.25);
-  space.add(saturn);
-  const radius = 17;
-  const sun = new THREE.Vector3(-0.74, 0.34, 0.22).normalize();
-  const planet = new THREE.Mesh(
-    new THREE.SphereGeometry(radius, 80, 48),
-    new THREE.ShaderMaterial({
-      uniforms: { sun: { value: sun } },
-      vertexShader: `
-        varying vec3 sphereNormal;
-        varying vec3 normalView;
-        varying vec3 positionView;
-        void main() {
-          sphereNormal = normal;
-          normalView = normalize(normalMatrix * normal);
-          vec4 eye = modelViewMatrix * vec4(position, 1.0);
-          positionView = eye.xyz;
-          gl_Position = projectionMatrix * eye;
-        }
-      `,
-      fragmentShader: `
-        uniform vec3 sun;
-        varying vec3 sphereNormal;
-        varying vec3 normalView;
-        varying vec3 positionView;
-        void main() {
-          vec3 n = normalize(sphereNormal);
-          float lat = asin(n.y);
-          float drift = sin(n.z * 14.0 + lat * 33.0) * 0.014;
-          float bands = sin((lat + drift) * 33.0) * 0.07
-            + sin(lat * 98.0 + sin(lat * 40.0)) * 0.027
-            + sin(lat * 220.0 + n.z * 2.0) * 0.013;
-          vec3 cool = vec3(0.27, 0.32, 0.37);
-          vec3 sand = vec3(0.56, 0.47, 0.34);
-          vec3 gas = mix(cool, sand, 0.65 + sin(lat * 4.0) * 0.21 + bands);
-          float light = smoothstep(-0.12, 0.96, dot(n, sun));
-          float edge = pow(1.0 - max(dot(normalize(normalView), normalize(-positionView)), 0.0), 4.1);
-          float shadow = 1.0 - 0.46 * (1.0 - smoothstep(0.01, 0.048, abs(n.y + n.x * 0.115 + 0.17)));
-          vec3 color = gas * (0.012 + light * shadow * 0.76) + vec3(0.23, 0.40, 0.50) * edge * (0.03 + light * 0.31);
-          gl_FragColor = vec4(color, 1.0);
-          #include <colorspace_fragment>
-        }
-      `,
-    }),
+export function makeSkyDome(invalidate: () => void) {
+  const orientation = new THREE.Matrix3().setFromMatrix4(
+    new THREE.Matrix4().makeRotationFromEuler(
+      new THREE.Euler(0.48, -1.55, 0.22),
+    ),
   );
-  saturn.add(planet);
-  const rings = new THREE.Mesh(
-    new THREE.RingGeometry(radius * 1.23, radius * 2.35, 160),
-    new THREE.ShaderMaterial({
-      uniforms: { radius: { value: radius }, sun: { value: sun } },
-      transparent: true,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      vertexShader: `
-        varying vec2 ringPosition;
-        varying vec3 relativePosition;
-        void main() {
-          ringPosition = position.xy;
-          relativePosition = mat3(modelMatrix) * position;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform float radius;
-        uniform vec3 sun;
-        varying vec2 ringPosition;
-        varying vec3 relativePosition;
-        void main() {
-          float r = length(ringPosition) / radius;
-          float bands = 0.65 + sin(r * 122.0) * 0.075 + sin(r * 481.0) * 0.06
-            + sin(r * 976.0) * 0.06 + sin(r * 21.0 + sin(r * 34.0)) * 0.21;
-          float division = smoothstep(0.028, 0.053, abs(r - 1.91)) * smoothstep(0.008, 0.019, abs(r - 2.19));
-          float bounds = smoothstep(1.23, 1.55, r) * (1.0 - smoothstep(2.24, 2.35, r));
-          float dark = dot(relativePosition, sun) < 0.0
-            ? smoothstep(0.95, 1.08, length(cross(relativePosition, sun)) / radius) : 1.0;
-          vec3 tint = mix(vec3(0.48, 0.39, 0.30), vec3(0.22, 0.28, 0.32), smoothstep(1.6, 2.35, r));
-          gl_FragColor = vec4(tint * (0.09 + dark * 0.62), bounds * division * bands * (0.42 + dark * 0.48));
-          #include <colorspace_fragment>
-        }
-      `,
-    }),
+  const material = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    uniforms: {
+      panorama: { value: null },
+      orientation: { value: orientation },
+      exposure: { value: 0.6 },
+    },
+    vertexShader: `
+      varying vec3 direction;
+      void main() {
+        direction = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        gl_Position.z = gl_Position.w;
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D panorama;
+      uniform mat3 orientation;
+      uniform float exposure;
+      varying vec3 direction;
+      void main() {
+        vec3 ray = normalize(orientation * direction);
+        vec2 uv = vec2(atan(ray.z, ray.x) * 0.15915494 + 0.5, asin(clamp(ray.y, -1.0, 1.0)) * 0.31830989 + 0.5);
+        vec2 horizontal = dFdx(uv);
+        vec2 vertical = dFdy(uv);
+        horizontal.x -= floor(horizontal.x + 0.5);
+        vertical.x -= floor(vertical.x + 0.5);
+        vec3 sky = textureGrad(panorama, uv, horizontal, vertical).rgb;
+        gl_FragColor = vec4(pow(max(sky, vec3(0.0)), vec3(1.52)) * exposure, 1.0);
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 20), material);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = -10;
+  mesh.visible = false;
+  new THREE.TextureLoader().load(
+    `${import.meta.env.BASE_URL}space/deep-sky.webp`,
+    (texture) => {
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.anisotropy = 8;
+      material.uniforms.panorama.value = texture;
+      mesh.visible = true;
+      invalidate();
+    },
   );
-  rings.rotation.set(-1.19, 0.23, 0);
-  saturn.add(rings);
-  return space;
+  return {
+    mesh,
+    setExposure(exposure: number) {
+      material.uniforms.exposure.value = exposure;
+    },
+  };
+}
+
+export type Detail = {
+  position: THREE.Vector3;
+  rotation: THREE.Quaternion;
+  scale: THREE.Vector3;
+  color: THREE.Color;
+};
+
+export function instances(
+  geometry: THREE.BufferGeometry,
+  material: THREE.Material,
+  details: Detail[],
+) {
+  const mesh = new THREE.InstancedMesh(geometry, material, details.length);
+  const matrix = new THREE.Matrix4();
+  details.forEach((detail, index) => {
+    matrix.compose(detail.position, detail.rotation, detail.scale);
+    mesh.setMatrixAt(index, matrix);
+    mesh.setColorAt(index, detail.color);
+  });
+  mesh.computeBoundingSphere();
+  return mesh;
 }

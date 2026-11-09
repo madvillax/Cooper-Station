@@ -1,37 +1,32 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { canvasTexture, seededRandom } from "./environment";
-import { RIM_RADIUS_METERS } from "./physics";
+import {
+  canvasTexture,
+  instances,
+  seededRandom,
+  type Detail,
+} from "./environment";
+import { makeHabitatCity } from "./habitat-city";
+import {
+  cityCoordinates,
+  citySurface,
+  CITY_HALF_LENGTH,
+  CITY_HALF_WIDTH,
+  HALF_LENGTH,
+  TAU,
+  terrainPoint,
+  terrainHeight,
+  surfaceAngle,
+  riverCenter,
+} from "./habitat-surface";
 
-export const RADIUS = RIM_RADIUS_METERS / 1000;
-export const HALF_LENGTH = 6.1;
-export const TAU = Math.PI * 2;
 const HULL_RADIUS = 3.53;
-const ANGLE_OFFSET = -Math.PI * 1.5;
-
-function riverCenter(v: number) {
-  return 0.53 + Math.sin(v * 10 + 0.3) * 0.029 + Math.sin(v * 20 - 1.9) * 0.014;
-}
-
-export function terrainHeight(u: number, v: number) {
-  const hills = (Math.sin(u * TAU * 3 + 1.2) * 0.5 + 0.5) ** 3;
-  const rolling = Math.sin(v * 19 - u * TAU * 4) * Math.sin(v * 13 + u * TAU * 5);
-  const bank = Math.min(Math.abs(u - riverCenter(v)) * 30, 1);
-  return (
-    (0.03 + hills * (0.29 + rolling * 0.17)) * bank + 0.022 * Math.sin(u * TAU * 14 + v * 29) * bank
-  );
-}
-
-export function terrainPoint(u: number, v: number, height = 0) {
-  const angle = u * TAU + ANGLE_OFFSET;
-  const r = RADIUS - terrainHeight(u, v) - height;
-  return new THREE.Vector3(Math.cos(angle) * r, Math.sin(angle) * r, (v * 2 - 1) * HALF_LENGTH);
-}
 
 function landTexture() {
   return canvasTexture(2048, 1536, (context) => {
     const { width, height } = context.canvas;
     const random = seededRandom(319);
+    const cityAxis = citySurface(0, 0).u;
     const image = context.createImageData(width, height);
     for (let y = 0; y < height; y++) {
       const v = 1 - y / height;
@@ -43,15 +38,22 @@ function landTexture() {
         const shore = Math.abs(u - river);
         const gridU = (u + 0.011 * Math.sin(v * 12)) * 63;
         const gridV = (v + 0.006 * Math.sin(u * TAU * 5)) * 46;
-        const parcel = Math.sin(Math.floor(gridU) * 54.59 + Math.floor(gridV) * 12.2);
+        const parcel = Math.sin(
+          Math.floor(gridU) * 54.59 + Math.floor(gridV) * 12.2,
+        );
         const rows = Math.sin((parcel > 0.4 ? gridU : gridV) * 63) * 3;
         const woodland = Math.sin(u * 49 + v * 21) * Math.sin(v * 28 - u * 61);
-        const field = shore > width + 0.002 && hill + woodland * 0.09 < 0.18 + parcel * 0.075;
+        const field =
+          shore > width + 0.002 &&
+          hill + woodland * 0.09 < 0.18 + parcel * 0.075;
         const track = field && (gridU % 1 < 0.027 || gridV % 1 < 0.022);
         const noise = random() * 17 - 8;
         const lane = Math.abs(u - (0.467 + 0.012 * Math.sin(v * 10))) < 0.00135;
-        const cross = Math.abs(v - 0.32) < 0.0025 || Math.abs(v - 0.72) < 0.0025;
-        const variation = Math.sin(u * 170 + Math.sin(v * 55) * 5) * Math.cos(v * 182 - u * 104);
+        const cross =
+          Math.abs(v - 0.32) < 0.0025 || Math.abs(v - 0.72) < 0.0025;
+        const variation =
+          Math.sin(u * 170 + Math.sin(v * 55) * 5) *
+          Math.cos(v * 182 - u * 104);
         const value = noise + (field ? parcel * 6 + rows : variation * 12);
         const shade = Math.cos(u * TAU * 3 + 1.2) * hill * 0.13;
         let red = field ? 109 + parcel * 35 : 49 + hill * 39;
@@ -71,7 +73,8 @@ function landTexture() {
           green = 132;
           blue = 91;
         }
-        if (lane || (cross && u > 0.42 && u < 0.64)) {
+        const accessRoad = Math.abs(u - cityAxis) < 0.0015 && v > 0.57;
+        if (lane || accessRoad || (cross && u > 0.42 && u < 0.64)) {
           red = 153;
           green = 144;
           blue = 117;
@@ -109,7 +112,10 @@ function makeTerrain() {
     }
   }
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
@@ -127,25 +133,6 @@ function makeTerrain() {
   );
 }
 
-type Detail = {
-  position: THREE.Vector3;
-  rotation: THREE.Quaternion;
-  scale: THREE.Vector3;
-  color: THREE.Color;
-};
-
-function instances(geometry: THREE.BufferGeometry, material: THREE.Material, details: Detail[]) {
-  const mesh = new THREE.InstancedMesh(geometry, material, details.length);
-  const matrix = new THREE.Matrix4();
-  details.forEach((detail, index) => {
-    matrix.compose(detail.position, detail.rotation, detail.scale);
-    mesh.setMatrixAt(index, matrix);
-    mesh.setColorAt(index, detail.color);
-  });
-  mesh.computeBoundingSphere();
-  return mesh;
-}
-
 function landscapeDetails() {
   const random = seededRandom(12218);
   const group = new THREE.Group();
@@ -154,7 +141,7 @@ function landscapeDetails() {
   const roofs: Detail[] = [];
   const up = new THREE.Vector3(0, 1, 0);
   const align = (u: number) => {
-    const angle = u * TAU + ANGLE_OFFSET;
+    const angle = surfaceAngle(u);
     return new THREE.Quaternion().setFromUnitVectors(
       up,
       new THREE.Vector3(-Math.cos(angle), -Math.sin(angle), 0),
@@ -164,8 +151,12 @@ function landscapeDetails() {
   for (let i = 0; i < 6600; i++) {
     const u = random();
     const v = random() * 0.99 + 0.005;
+    const { x, z } = cityCoordinates(u, v);
+    if (Math.abs(x) < CITY_HALF_WIDTH && Math.abs(z) < CITY_HALF_LENGTH)
+      continue;
     const bank = Math.abs(u - riverCenter(v));
-    if (bank < 0.016 || (terrainHeight(u, v) < 0.15 && random() > 0.17)) continue;
+    if (bank < 0.016 || (terrainHeight(u, v) < 0.15 && random() > 0.17))
+      continue;
     const h = 0.012 + random() ** 2 * 0.041;
     const w = h * (0.48 + random() * 0.42);
     trees.push({
@@ -193,6 +184,9 @@ function landscapeDetails() {
         if (random() < 0.25 || row === 0 || col === 0) continue;
         const u = centerU + (col + random() * 0.45) * 0.002;
         const v = centerV + (row + random() * 0.45) * 0.0033;
+        const { x, z } = cityCoordinates(u, v);
+        if (Math.abs(x) < CITY_HALF_WIDTH && Math.abs(z) < CITY_HALF_LENGTH)
+          continue;
         if (Math.abs(u - riverCenter(v)) < 0.014) continue;
         const scale = new THREE.Vector3(
           0.013 + random() * 0.021,
@@ -204,12 +198,20 @@ function landscapeDetails() {
           position: terrainPoint(u, v, scale.y * 0.48),
           rotation,
           scale,
-          color: new THREE.Color().setHSL(0.095 + random() * 0.1, 0.15, 0.49 + random() * 0.31),
+          color: new THREE.Color().setHSL(
+            0.095 + random() * 0.1,
+            0.15,
+            0.49 + random() * 0.31,
+          ),
         });
         roofs.push({
           position: terrainPoint(u, v, scale.y),
           rotation,
-          scale: new THREE.Vector3(scale.x * 1.09, scale.x * 0.29, scale.z * 1.09),
+          scale: new THREE.Vector3(
+            scale.x * 1.09,
+            scale.x * 0.29,
+            scale.z * 1.09,
+          ),
           color: new THREE.Color().setHSL(
             0.025 + random() * 0.11,
             0.18 + random() * 0.22,
@@ -223,7 +225,9 @@ function landscapeDetails() {
   const treeGeometry = mergeGeometries([
     new THREE.CylinderGeometry(0.06, 0.095, 0.5, 5).translate(0, -0.23, 0),
     new THREE.ConeGeometry(0.52, 0.71, 6).translate(0, 0, 0),
-    new THREE.ConeGeometry(0.38, 0.64, 6).rotateY(Math.PI / 6).translate(0, 0.22, 0),
+    new THREE.ConeGeometry(0.38, 0.64, 6)
+      .rotateY(Math.PI / 6)
+      .translate(0, 0.22, 0),
   ]);
   const gable = new THREE.Shape()
     .moveTo(-0.5, -0.12)
@@ -253,7 +257,11 @@ function landscapeDetails() {
     }
   });
   group.add(
-    instances(treeGeometry, new THREE.MeshStandardMaterial({ roughness: 0.95 }), trees),
+    instances(
+      treeGeometry,
+      new THREE.MeshStandardMaterial({ roughness: 0.95 }),
+      trees,
+    ),
     instances(
       new THREE.BoxGeometry(1, 1, 1),
       new THREE.MeshStandardMaterial({
@@ -264,7 +272,11 @@ function landscapeDetails() {
       }),
       walls,
     ),
-    instances(roofGeometry, new THREE.MeshStandardMaterial({ roughness: 0.9 }), roofs),
+    instances(
+      roofGeometry,
+      new THREE.MeshStandardMaterial({ roughness: 0.9 }),
+      roofs,
+    ),
   );
   return group;
 }
@@ -272,25 +284,44 @@ function landscapeDetails() {
 function hullTexture() {
   return canvasTexture(768, 1536, (context) => {
     const random = seededRandom(943);
-    context.fillStyle = "#646c73";
+    context.fillStyle = "#252b31";
     context.fillRect(0, 0, 768, 1536);
     for (let row = 0; row < 30; row++) {
       for (let column = 0; column < 12; column++) {
         const x = column * 64;
         const y = row * 51.2;
-        const value = Math.floor(100 + random() * 25 + (row % 6 === 0 ? 17 : 0));
+        const value = Math.floor(
+          121 +
+            random() * 30 +
+            (column % 4 === 0 ? -44 : row % 6 === 0 ? 23 : 0),
+        );
         context.fillStyle = `rgb(${value - 4}, ${value}, ${value + 4})`;
         context.fillRect(x + 1, y + 1, 62, 49);
         context.fillStyle = "#c2c6c4";
         context.fillRect(x + 1, y + 1, 1, 47);
         context.fillRect(x + 1, y + 1, 61, 1);
+        context.fillStyle = "#171f29a0";
+        context.fillRect(x + 6, y + 42, 51, 3);
+        context.fillRect(x + 57, y + 5, 2, 38);
+        for (const corner of [4, 59]) {
+          context.fillRect(x + corner, y + 6, 2, 2);
+          context.fillRect(x + corner, y + 43, 2, 2);
+        }
+        if (column % 4 === 0 && row % 3 === 1) {
+          context.fillStyle = "#171f2a";
+          context.fillRect(x + 10, y + 10, 43, 29);
+          for (let slat = 0; slat < 6; slat++) {
+            context.fillStyle = slat % 2 === 0 ? "#526173" : "#384653";
+            context.fillRect(x + 13, y + 12 + slat * 4, 36, 2);
+          }
+        }
         if (random() > 0.68) {
           context.fillStyle = "#384149";
           context.fillRect(x + 7, y + 7, 18 + random() * 26, 2);
           context.fillRect(x + 7, y + 11, 12, 2);
         }
         if (random() > 0.91) {
-          context.fillStyle = "#ad835c";
+          context.fillStyle = "#9cafc5";
           context.fillRect(x + 49, y + 10, 7, 24);
         }
       }
@@ -308,26 +339,30 @@ export function createStation() {
   const structure = new THREE.Group();
   const spin = new THREE.Group();
   const landscape = new THREE.Group();
-  landscape.add(makeTerrain(), landscapeDetails());
+  const city = makeHabitatCity();
+  landscape.add(makeTerrain(), landscapeDetails(), city.group);
   spin.add(shell, structure, landscape);
   const root = new THREE.Group();
   root.add(spin);
   root.rotation.set(-0.16, -0.73, -0.12);
 
+  const skin = hullTexture();
   const panels = new THREE.MeshStandardMaterial({
-    map: hullTexture(),
-    roughness: 0.48,
+    map: skin,
+    bumpMap: skin,
+    bumpScale: 0.041,
+    roughness: 0.5,
     metalness: 0.3,
     emissive: 0x252f35,
     emissiveIntensity: 0.14,
   });
   const steel = new THREE.MeshStandardMaterial({
-    color: 0x909b9d,
+    color: 0xaebdcd,
     roughness: 0.43,
     metalness: 0.43,
   });
   const dark = new THREE.MeshStandardMaterial({
-    color: 0x394651,
+    color: 0x344358,
     roughness: 0.53,
     metalness: 0.43,
   });
@@ -338,10 +373,27 @@ export function createStation() {
     emissive: 0x493017,
     emissiveIntensity: 0.25,
   });
-  const light = new THREE.MeshBasicMaterial({ color: 0xffc48c });
+  const light = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const equipment = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.65,
+    metalness: 0.32,
+    emissive: 0x182331,
+    emissiveIntensity: 0.42,
+  });
+  const cube = new THREE.BoxGeometry(1, 1, 1);
+  const axis = new THREE.Vector3(0, 0, 1);
 
-  const tube = (radius: number, thickness: number, material: THREE.Material, z: number) => {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, thickness, 8, 120), material);
+  const tube = (
+    radius: number,
+    thickness: number,
+    material: THREE.Material,
+    z: number,
+  ) => {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(radius, thickness, 8, 120),
+      material,
+    );
     ring.position.z = z;
     structure.add(ring);
   };
@@ -369,10 +421,87 @@ export function createStation() {
       new THREE.BoxGeometry(0.145, 0.12, 12.1),
       i % 3 === 0 ? brass : steel,
     );
-    rib.position.set(HULL_RADIUS * Math.sin(angle), -HULL_RADIUS * Math.cos(angle), 0);
+    rib.position.set(
+      HULL_RADIUS * Math.sin(angle),
+      -HULL_RADIUS * Math.cos(angle),
+      0,
+    );
     rib.rotation.z = theta;
     wedge.add(rib);
     const lamps: Detail[] = [];
+    const modules: Detail[] = [];
+    const sectionAngle = angle + TAU / 24;
+    const outward = new THREE.Vector3(
+      Math.sin(sectionAngle),
+      -Math.cos(sectionAngle),
+      0,
+    );
+    const across = new THREE.Vector3(
+      Math.cos(sectionAngle),
+      Math.sin(sectionAngle),
+      0,
+    );
+    const rotation = new THREE.Quaternion().setFromAxisAngle(
+      axis,
+      sectionAngle,
+    );
+    const addModule = (
+      side: number,
+      radius: number,
+      z: number,
+      width: number,
+      depth: number,
+      length: number,
+      color: number,
+    ) => {
+      modules.push({
+        position: outward
+          .clone()
+          .multiplyScalar(radius)
+          .addScaledVector(across, side)
+          .setZ(z),
+        rotation,
+        scale: new THREE.Vector3(width, depth, length),
+        color: new THREE.Color(color),
+      });
+    };
+    for (const z of [-4.75, -2.95, -1.12, 0.7, 2.5, 4.3]) {
+      addModule(0, HULL_RADIUS + 0.016, z, 0.87, 0.16, 1.39, 0x252e3a);
+      addModule(-0.32, HULL_RADIUS + 0.108, z, 0.11, 0.19, 1.33, 0x9baabb);
+      addModule(0.32, HULL_RADIUS + 0.108, z, 0.11, 0.19, 1.33, 0x8e9dac);
+      for (let fin = 0; fin < 7; fin++) {
+        addModule(
+          0,
+          HULL_RADIUS + 0.125,
+          z + (fin - 3) * 0.158,
+          0.58,
+          0.035,
+          0.069,
+          fin % 3 === 0 ? 0x8291a5 : 0x516378,
+        );
+      }
+      addModule(-0.6, HULL_RADIUS + 0.02, z + 0.25, 0.29, 0.12, 0.72, 0x9aa9b9);
+      addModule(
+        0.62,
+        HULL_RADIUS + 0.028,
+        z - 0.18,
+        0.23,
+        0.17,
+        0.48,
+        0x616f7f,
+      );
+    }
+    for (const side of [-0.72, 0.73]) {
+      addModule(side, HULL_RADIUS + 0.04, 0, 0.048, 0.076, 11.73, 0x8493a5);
+    }
+    if (i % 3 === 0) {
+      for (const z of [-5.38, 5.31]) {
+        addModule(0.12, HULL_RADIUS + 0.23, z, 0.83, 0.47, 0.69, 0x8296ac);
+        addModule(0.12, HULL_RADIUS + 0.52, z, 0.4, 0.23, 0.45, 0x49586c);
+        addModule(0.12, HULL_RADIUS + 0.66, z, 0.15, 0.1, 0.29, 0xb7c9de);
+      }
+    }
+    wedge.add(instances(cube, equipment, modules));
     for (let j = 0; j < 14; j++) {
       lamps.push({
         position: new THREE.Vector3(
@@ -380,12 +509,15 @@ export function createStation() {
           -(HULL_RADIUS + 0.07) * Math.cos(angle + 0.012),
           (j - 6.5) * 0.8,
         ),
-        rotation: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), theta),
+        rotation: new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 0, 1),
+          theta,
+        ),
         scale: new THREE.Vector3(0.026, 0.018, 0.064),
-        color: new THREE.Color(0xffffff),
+        color: new THREE.Color(j % 5 === 0 ? 0xffb783 : 0x9edbff),
       });
     }
-    wedge.add(instances(new THREE.BoxGeometry(1, 1, 1), light, lamps));
+    wedge.add(instances(cube, light, lamps));
     shell.add(wedge);
     removablePanels.push(wedge);
   }
@@ -410,22 +542,36 @@ export function createStation() {
   });
   const braces: Detail[] = [];
   for (const radius of [0.82, 1.16, 1.58, 2.06, 2.57, 2.92]) {
-    tube(radius, radius === 2.57 ? 0.062 : 0.026, radius === 1.16 ? brass : dark, -6.03);
+    tube(
+      radius,
+      radius === 2.57 ? 0.062 : 0.026,
+      radius === 1.16 ? brass : dark,
+      -6.03,
+    );
   }
   const radial: Detail[] = [];
   const lamps: Detail[] = [];
-  const axis = new THREE.Vector3(0, 0, 1);
   for (const end of [-1, 1]) {
-    const cap = new THREE.Mesh(new THREE.RingGeometry(end > 0 ? 3.02 : 0.58, 3.54, 120), bulkhead);
+    const cap = new THREE.Mesh(
+      new THREE.RingGeometry(end > 0 ? 3.02 : 0.58, 3.54, 120),
+      bulkhead,
+    );
     cap.position.z = end * 6.11;
     structure.add(cap);
     tube(end > 0 ? 3.04 : 0.62, 0.05, brass, end * 6.14);
+    tube(3.56, 0.077, dark, end * 6.29);
+    tube(3.48, 0.031, steel, end * 6.35);
+    tube(3.26, 0.032, dark, end * 6.24);
     for (let i = 0; i < 72; i++) {
       const angle = (i * TAU) / 72;
       const rotation = new THREE.Quaternion().setFromAxisAngle(axis, angle);
       if (end < 0 && i % 6 === 0) {
         braces.push({
-          position: new THREE.Vector3(Math.cos(angle) * 1.91, Math.sin(angle) * 1.91, -6.025),
+          position: new THREE.Vector3(
+            Math.cos(angle) * 1.91,
+            Math.sin(angle) * 1.91,
+            -6.025,
+          ),
           rotation,
           scale: new THREE.Vector3(2.22, 0.095, 0.13),
           color: new THREE.Color(i % 12 === 0 ? 0xb5ac9c : 0x849698),
@@ -433,32 +579,70 @@ export function createStation() {
       }
       if (end < 0 && i % 2 === 0) {
         lamps.push({
-          position: new THREE.Vector3(Math.cos(angle) * 2.54, Math.sin(angle) * 2.54, -5.98),
+          position: new THREE.Vector3(
+            Math.cos(angle) * 2.54,
+            Math.sin(angle) * 2.54,
+            -5.98,
+          ),
           rotation,
           scale: new THREE.Vector3(0.035, 0.068, 0.021),
           color: new THREE.Color(i % 6 === 0 ? 0xffbb87 : 0x8db7ca),
         });
       }
+      if (end > 0 && i % 6 === 0) {
+        braces.push({
+          position: new THREE.Vector3(
+            Math.cos(angle) * 3.06,
+            Math.sin(angle) * 3.06,
+            6.24,
+          ),
+          rotation,
+          scale: new THREE.Vector3(0.88, 0.18, 0.27),
+          color: new THREE.Color(i % 12 === 0 ? 0xc3d1df : 0x879aac),
+        });
+        lamps.push({
+          position: new THREE.Vector3(
+            Math.cos(angle) * 2.62,
+            Math.sin(angle) * 2.62,
+            6.29,
+          ),
+          rotation,
+          scale: new THREE.Vector3(0.044, 0.126, 0.055),
+          color: new THREE.Color(0x9edbff),
+        });
+      }
       const radius = i % 6 === 0 ? 3.39 : 3.51;
       radial.push({
-        position: new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius, end * 6.16),
+        position: new THREE.Vector3(
+          Math.cos(angle) * radius,
+          Math.sin(angle) * radius,
+          end * 6.16,
+        ),
         rotation,
-        scale: new THREE.Vector3(i % 6 === 0 ? 0.48 : 0.18, i % 6 === 0 ? 0.105 : 0.035, 0.1),
+        scale: new THREE.Vector3(
+          i % 6 === 0 ? 0.48 : 0.18,
+          i % 6 === 0 ? 0.105 : 0.035,
+          0.1,
+        ),
         color: new THREE.Color(i % 6 === 0 ? 0xccbfab : 0x7d838b),
       });
       if (i % 3 === 0) {
         lamps.push({
-          position: new THREE.Vector3(Math.cos(angle) * 3.15, Math.sin(angle) * 3.15, end * 6.19),
+          position: new THREE.Vector3(
+            Math.cos(angle) * 3.15,
+            Math.sin(angle) * 3.15,
+            end * 6.19,
+          ),
           rotation,
           scale: new THREE.Vector3(0.025, 0.071, 0.022),
-          color: new THREE.Color(i % 2 === 0 ? 0xffba85 : 0xffe2b8),
+          color: new THREE.Color(i % 2 === 0 ? 0xa5d7ff : 0xe7efff),
         });
       }
     }
   }
   structure.add(
-    instances(new THREE.BoxGeometry(1, 1, 1), steel, [...radial, ...braces]),
-    instances(new THREE.BoxGeometry(1, 1, 1), light, lamps),
+    instances(cube, steel, [...radial, ...braces]),
+    instances(cube, light, lamps),
   );
 
   const sunline = new THREE.Mesh(
@@ -490,10 +674,13 @@ export function createStation() {
   glow.position.z = -5.84;
   spin.add(glow);
   for (const z of [-4.9, -2.45, 0, 2.45, 4.9]) {
-    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.018, 6, 16), brass);
+    const collar = new THREE.Mesh(
+      new THREE.TorusGeometry(0.075, 0.018, 6, 16),
+      brass,
+    );
     collar.position.z = z;
     spin.add(collar);
   }
 
-  return { root, spin, removablePanels, landscape };
+  return { root, spin, removablePanels, landscape, city };
 }
