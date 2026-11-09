@@ -88,6 +88,106 @@ a {
 .launch-art {
   pointer-events: none;
 }
+.launch-collage {
+  position: absolute;
+  inset: 0 0 32%;
+  pointer-events: none;
+}
+.launch-photo {
+  position: absolute;
+  left: var(--photo-x);
+  top: var(--photo-y);
+  width: min(var(--photo-width), var(--photo-max, 390px), var(--photo-height-cap, 47svh));
+  aspect-ratio: var(--photo-ratio, 3 / 2);
+  object-fit: cover;
+  object-position: var(--photo-crop, center);
+  transform: translate(-50%, -50%) rotate(var(--photo-tilt));
+  background: #10141b;
+  border: solid #b4bbbf;
+  border-width: 3px 3px 7px;
+  box-shadow: 0 14px 34px #000c;
+  filter: saturate(0.82) brightness(0.86);
+}
+.launch-photo--crew {
+  --photo-x: 28%;
+  --photo-y: 30%;
+  --photo-width: 25vw;
+  --photo-tilt: -11deg;
+}
+.launch-photo--home {
+  --photo-x: 76%;
+  --photo-y: 31%;
+  --photo-width: 23vw;
+  --photo-tilt: 10deg;
+}
+.launch-photo--cockpit {
+  --photo-x: 22%;
+  --photo-y: 72%;
+  --photo-width: 21vw;
+  --photo-tilt: 7deg;
+}
+.launch-photo--ice {
+  --photo-x: 77%;
+  --photo-y: 76%;
+  --photo-width: 24vw;
+  --photo-tilt: -9deg;
+  --photo-ratio: 1.85;
+  --photo-crop: 82% center;
+}
+.launch-photo--gargantua {
+  --photo-x: 51%;
+  --photo-y: 50%;
+  --photo-width: 41vw;
+  --photo-tilt: -4deg;
+  --photo-ratio: 1.88;
+  --photo-max: 640px;
+  --photo-height-cap: 64svh;
+  --photo-crop: 62% center;
+  filter: saturate(0.88) brightness(0.95);
+}
+@media (max-aspect-ratio: 4/5) {
+  .launch-photo--crew {
+    --photo-x: 28%;
+    --photo-y: 24%;
+    --photo-width: 47vw;
+  }
+  .launch-photo--home {
+    --photo-x: 73%;
+    --photo-y: 29%;
+    --photo-width: 44vw;
+  }
+  .launch-photo--cockpit {
+    --photo-x: 27%;
+    --photo-y: 67%;
+    --photo-width: 45vw;
+  }
+  .launch-photo--ice {
+    --photo-x: 72%;
+    --photo-y: 75%;
+    --photo-width: 49vw;
+  }
+  .launch-photo--gargantua {
+    --photo-y: 47%;
+    --photo-width: 78vw;
+  }
+}
+@media (max-height: 520px) and (min-aspect-ratio: 4/5) {
+  .launch-collage {
+    bottom: 43%;
+  }
+  .launch-photo {
+    width: min(var(--photo-width), 39svh);
+  }
+  .launch-photo--cockpit {
+    --photo-y: 69%;
+  }
+  .launch-photo--ice {
+    --photo-y: 72%;
+  }
+  .launch-photo--gargantua {
+    width: min(var(--photo-width), 55svh);
+  }
+}
 .launch::after {
   content: "";
   position: absolute;
