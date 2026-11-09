@@ -1,0 +1,22 @@
+{
+  "name": "cooper-station",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "vp build"
+  },
+  "dependencies": {
+    "@fontsource-variable/space-grotesk": "^5.2.0",
+    "@fontsource/ibm-plex-mono": "^5.2.0",
+    "@tabler/icons": "^3.34.0",
+    "three": "~0.182.0"
+  },
+  "devDependencies": {
+    "@types/three": "~0.182.0",
+    "typescript": "^5.9.0",
+    "vite-plus": "^0.3.0"
+  },
+  "packageManager": "pnpm@12.6.0"
+}

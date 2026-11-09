@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080b10" />
+    <meta
+      name="description"
+      content="Fly inside Cooper Station and explore a rotating O’Neill habitat in real-time 3D."
+    />
+    <link rel="icon" href="/station-mark.svg" type="image/svg+xml" />
+    <title>Cooper Station | O’Neill Cylinder Simulator</title>
+  </head>
+  <body>
+    <main class="flight-deck">
+      <header class="masthead">
+        <div class="brand">
+          <img src="/station-mark.svg" alt="" width="34" height="34" />
+          <div><strong>COOPER STATION</strong><span>HABITAT SIMULATION</span></div>
+        </div>
+        <div class="header-right">
+          <span class="live-label"><i></i><span id="system-state">Initializing</span></span>
+          <button class="utility" id="open-brief" type="button">
+            <span data-icon="info"></span> Mission Brief
+          </button>
+        </div>
+      </header>
+
+      <section class="stage" id="stage" data-view="orbital" aria-label="Station viewport">
+        <img class="poster" src="/station-preview.webp" alt="" fetchpriority="high" />
+        <div
+          class="world"
+          id="world"
+          tabindex="0"
+          aria-label="Interactive 3D view. Use the arrow keys to look. In Habitat view, use W A S D to move."
+        ></div>
+        <div class="stage-shade"></div>
+        <div class="reticle" aria-hidden="true"></div>
+        <div class="hero">
+          <p class="eyebrow">SATURN ORBIT <span></span> CS-01</p>
+          <h1>Cooper<br />Station<span>.</span></h1>
+          <p class="hero-description">A world built on the inside of a spinning cylinder.</p>
+          <button class="enter" id="enter" type="button" disabled>
+            Enter Habitat <span data-icon="arrow"></span>
+          </button>
+        </div>
+        <div class="inside-label">
+          <p class="eyebrow">CS-01 <span></span> INTERIOR</p>
+          <p>Habitat valley</p>
+          <button class="utility" id="exit" type="button">
+            <span data-icon="back"></span> Return to Orbit
+          </button>
+        </div>
+        <div class="camera-tools">
+          <button
+            type="button"
+            class="icon-button"
+            id="reset-view"
+            title="Reset camera"
+            aria-label="Reset camera"
+            disabled
+          >
+            <span data-icon="reset"></span>
+          </button>
+        </div>
+        <div class="view-caption">
+          <span id="view-id">CAM 01 / ORBITAL</span>
+          <span id="view-tip">Drag to orbit · Scroll to zoom</span>
+        </div>
+        <div class="compass" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+        </div>
+        <div class="move-pad" aria-label="Habitat movement">
+          <button class="icon-button" data-move="KeyW" type="button" aria-label="Move forward">
+            <span data-icon="up"></span>
+          </button>
+          <button class="icon-button" data-move="KeyA" type="button" aria-label="Move left">
+            <span data-icon="left"></span>
+          </button>
+          <button class="icon-button" data-move="KeyS" type="button" aria-label="Move backward">
+            <span data-icon="down"></span>
+          </button>
+          <button class="icon-button" data-move="KeyD" type="button" aria-label="Move right">
+            <span data-icon="right"></span>
+          </button>
+        </div>
+        <p class="graphics-notice" id="graphics-notice" role="status" hidden>
+          3D rendering is unavailable on this device. You can still explore the spin and gravity
+          relationship below.
+        </p>
+      </section>
+
+      <section class="console" aria-label="Simulation controls">
+        <div class="console-block view-block">
+          <p class="control-label">01 <span>Camera</span></p>
+          <div class="view-switch" role="group" aria-label="Camera view">
+            <button data-view="orbital" aria-pressed="true" type="button" disabled>
+              <span data-icon="orbit"></span> Orbital
+            </button>
+            <button data-view="cutaway" aria-pressed="false" type="button" disabled>
+              <span data-icon="cutaway"></span> Cutaway
+            </button>
+            <button data-view="habitat" aria-pressed="false" type="button" disabled>
+              <span data-icon="habitat"></span> Habitat
+            </button>
+          </div>
+        </div>
+        <div class="console-block spin-block">
+          <div class="spin-heading">
+            <label class="control-label" for="spin">02 <span>Rotation</span></label
+            ><output id="spin-value" for="spin">0.53 <span>RPM</span></output>
+          </div>
+          <div class="spin-controls">
+            <button
+              type="button"
+              class="icon-button"
+              id="toggle-spin"
+              aria-label="Pause simulation"
+              title="Pause simulation"
+            >
+              <span data-icon="pause"></span>
+            </button>
+            <input id="spin" type="range" min="0" max="0.85" value="0.53" step="0.01" />
+            <button
+              type="button"
+              class="utility time-button"
+              id="time-scale"
+              aria-label="Time scale 1 times. Change time scale."
+              title="Change time scale"
+            >
+              1×
+            </button>
+          </div>
+        </div>
+        <div class="console-block gravity-block">
+          <p class="control-label">03 <span>Gravity at Rim</span></p>
+          <div class="readouts">
+            <div class="gravity"><output id="gravity" for="spin">1.01</output> <span>g</span></div>
+            <div class="radius">
+              <strong>3.2 <span>km</span></strong
+              ><span>RIM RADIUS</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <footer class="footnote">
+        <span>AN INTERSTELLAR-INSPIRED SIMULATION</span
+        ><span>ROTATIONAL GRAVITY MODEL <b>ω²r</b></span>
+      </footer>
+    </main>
+
+    <dialog id="brief" aria-labelledby="brief-title">
+      <div class="brief-content">
+        <form method="dialog">
+          <button class="icon-button close" aria-label="Close mission brief">
+            <span data-icon="close"></span>
+          </button>
+        </form>
+        <p class="eyebrow">CS-01 <span></span> FIELD GUIDE</p>
+        <h2 id="brief-title">Mission Brief</h2>
+        <p>
+          Cooper Station is a fictional settlement inspired by Gerard O’Neill’s rotating space
+          habitats. Its farms, river and settlements line the inner wall, so the landscape curves up
+          and overhead.
+        </p>
+        <dl>
+          <div>
+            <dt>Orbital</dt>
+            <dd>Drag to orbit the station. Scroll or pinch to change your distance.</dd>
+          </div>
+          <div>
+            <dt>Cutaway</dt>
+            <dd>Look through a section of the outer hull to see the full landscape.</dd>
+          </div>
+          <div>
+            <dt>Habitat</dt>
+            <dd>
+              Fly through the docking aperture, then use WASD or the on-screen arrows to move. Drag
+              or use the arrow keys to look around.
+            </dd>
+          </div>
+          <div>
+            <dt>Rotation</dt>
+            <dd>
+              Change the spin to see the gravity at the rim. Gravity rises with the square of the
+              spin and falls toward zero at the axis. The time multiplier changes playback speed.
+            </dd>
+          </div>
+        </dl>
+        <p class="brief-note">
+          The habitat dimensions are illustrative. Rim gravity uses a radius of 3.2 km and Earth
+          gravity as its reference.
+        </p>
+      </div>
+    </dialog>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
