@@ -143,7 +143,7 @@
   const press = (id) => () => document.getElementById(id).click();
   const visit = (name) => () => {
     const button = [...document.querySelectorAll("#destination-list button")].find(
-      (entry) => entry.dataset.destination === name || entry.textContent.trim() === name,
+      (entry) => entry.dataset.name === name || entry.dataset.destination === name,
     );
     if (!button) throw new Error(`No Atlas entry for ${name}`);
     button.click();

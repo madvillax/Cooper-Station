@@ -111,12 +111,34 @@ function stationReflections(renderer: THREE.WebGLRenderer) {
   return reflection;
 }
 
+export type Telemetry = {
+  /** Camera distance from Gargantua, in Schwarzschild radii. */
+  cameraRadiusInRs: number;
+  /** Simulation date, in days since J2000. */
+  simDays: number;
+  /** Where to draw each name label, in CSS pixels from the view's top left. */
+  labels: { id: string; x: number; y: number; visible: boolean }[];
+};
+
+const labelled = [
+  "sun",
+  "mercury",
+  "venus",
+  "earth",
+  "mars",
+  "jupiter",
+  "saturn",
+  "uranus",
+  "neptune",
+] as const;
+
 export async function startFlight({
   host,
   initialDestination,
   initialView,
   onGraphics,
   onProgress,
+  onFrame,
   onAction,
   allowControls,
   onSelectBody,
@@ -128,6 +150,8 @@ export async function startFlight({
   onGraphics: (available: boolean) => void;
   /** Warm-up progress from 0 to 1, with a short label for the current step. */
   onProgress?: (fraction: number, label: string) => void;
+  /** Called after every drawn frame with figures and label positions for the HUD. */
+  onFrame?: (telemetry: Telemetry) => void;
   /** Keyboard shortcuts that belong to the HUD rather than the camera. */
   onAction?: (action: Exclude<Action, "reset">) => void;
   allowControls: () => boolean;
@@ -281,6 +305,13 @@ export async function startFlight({
     ready: boolean;
   } | null = null;
   let fade = 0;
+  let guidesShown = true;
+  const telemetry: Telemetry = {
+    cameraRadiusInRs: 0,
+    simDays: 0,
+    labels: [...labelled, "sol"].map((id) => ({ id, x: 0, y: 0, visible: false })),
+  };
+  const projected = new THREE.Vector3();
   const warmed = new Map<WarmGroup, Promise<void>>();
   /** Resolves once a destination group can be shown without a hitch. */
   const whenWarm = (group: WarmGroup) => warmed.get(group) ?? Promise.resolve();
@@ -448,7 +479,8 @@ export async function startFlight({
     // Offset to the side that puts Saturn lower right, clear of the data card.
     let yaw = orbit.yaw + Math.atan2(saturn.x, saturn.z) - 0.6;
     let pitch = orbit.pitch + 0.34;
-    let distance = 21 * Math.max(1, 0.76 / aspect);
+    // Pull back on tall screens so the Sun and Saturn both stay in frame.
+    let distance = 21 * Math.max(1, 1.15 / aspect);
     focus.copy(saturn).multiplyScalar(0.62);
     if (stop !== "system") {
       const body = atlas.getBody(stop);
@@ -538,9 +570,12 @@ export async function startFlight({
   }
 
   function fit() {
+    // A collapsed or hidden container reports zero. Keep the last real size:
+    // a zero would turn the aspect ratio, then the camera, into NaN, and three
+    // throws when it uploads a NaN clipping plane.
+    if (!host.clientWidth || !host.clientHeight) return;
     viewportWidth = host.clientWidth;
     viewportHeight = host.clientHeight;
-    if (!viewportWidth || !viewportHeight) return;
     camera.aspect = viewportWidth / viewportHeight;
     camera.updateProjectionMatrix();
     const density = Math.sqrt(2_560_000 / (viewportWidth * viewportHeight));
@@ -829,6 +864,40 @@ export async function startFlight({
         0.12,
         1.2,
       );
+    }
+  }
+
+  /** Fills `telemetry`. Labels sit just under each body's disc. */
+  function report(warpAmount: number) {
+    telemetry.simDays = simDays;
+    telemetry.cameraRadiusInRs = camera.position.length() / HORIZON_RADIUS;
+    const show = guidesShown && warpAmount < 0.05 && !transition;
+    const pixelsPerUnit =
+      viewportHeight / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    for (const label of telemetry.labels) {
+      label.visible = false;
+      let radius = 0;
+      if (label.id === "sol") {
+        if (!show || destination !== "galaxy") continue;
+        atlas.sol(projected);
+        radius = 0.24;
+      } else {
+        if (!show || destination !== "system") continue;
+        const body = atlas.getBody(label.id as (typeof labelled)[number]).frame;
+        projected.copy(body.position);
+        radius = body.scale.x;
+      }
+      const distance = projected.distanceTo(camera.position);
+      projected.project(camera);
+      if (projected.z > 1 || Math.abs(projected.x) > 1.1 || Math.abs(projected.y) > 1.1) {
+        continue;
+      }
+      label.visible = true;
+      label.x = (projected.x * 0.5 + 0.5) * viewportWidth;
+      label.y =
+        (0.5 - projected.y * 0.5) * viewportHeight +
+        (radius / distance) * pixelsPerUnit +
+        6;
     }
   }
 
@@ -1173,6 +1242,10 @@ export async function startFlight({
     atlas.faceCamera(camera, elapsed);
     draw();
     dirty = false;
+    if (onFrame) {
+      report(warpAmount);
+      onFrame(telemetry);
+    }
   }
 
   function advanceSolarRoute(direction: number) {
@@ -1388,16 +1461,6 @@ export async function startFlight({
     setView,
     zoom,
     reset,
-    move,
-    nudge(key: string) {
-      if (!isHabitatView(view) || transition) return;
-      moveAcross(
-        Number(key === "KeyW") - Number(key === "KeyS"),
-        Number(key === "KeyD") - Number(key === "KeyA"),
-        0.24,
-      );
-      dirty = true;
-    },
     setSpin(nextRpm: number) {
       rpm = nextRpm;
       dirty = true;
@@ -1413,6 +1476,7 @@ export async function startFlight({
       dirty = true;
     },
     setGuides(visible: boolean) {
+      guidesShown = visible;
       atlas.setGuides(visible);
       dirty = true;
     },

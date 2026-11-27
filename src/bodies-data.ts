@@ -179,7 +179,8 @@ export function facts(destination: Destination): Facts {
         summary: "Rotating cylinder habitat in Saturn orbit",
         rows: [
           { label: "Radius", value: "3.2 km" },
-          { label: "Orbits", value: "Saturn, 9.57 AU from the Sun" },
+          { label: "Orbits", value: "Saturn" },
+          { label: "From Sun", value: "9.57 AU" },
           { label: "Gravity from", value: "Spin, not mass" },
         ],
       };

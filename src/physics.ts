@@ -36,6 +36,10 @@ export function daysSinceJ2000(date: Date) {
   return (date.getTime() - J2000_MS) / MS_PER_DAY;
 }
 
+export function dateFromJ2000(days: number) {
+  return new Date(J2000_MS + days * MS_PER_DAY);
+}
+
 /** Position on a circular orbit, in radians within one turn. */
 export function orbitAngle(
   meanLongitudeDeg: number,

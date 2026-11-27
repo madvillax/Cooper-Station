@@ -650,5 +650,9 @@ export function createAtlas(
     setGuides(visible: boolean) {
       guides.visible = visible;
     },
+    /** World position of the Sun's marker in the galaxy view. */
+    sol(target: THREE.Vector3) {
+      return galaxy.localToWorld(target.copy(galaxy.userData.sol as THREE.Vector3));
+    },
   };
 }

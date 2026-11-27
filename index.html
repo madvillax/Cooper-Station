@@ -88,57 +88,80 @@
         class="world"
         id="world"
         tabindex="0"
-        aria-label="3D space view. Drag or use the arrow keys to look around."
+        aria-label="3D space view. Drag to look around. Scroll to zoom."
       ></div>
-      <div class="vignette" aria-hidden="true"></div>
+      <div class="shade" aria-hidden="true"></div>
+      <div class="labels" id="labels"></div>
 
       <header class="topbar">
-        <button
-          class="brand"
-          id="return-map"
-          type="button"
-          aria-label="Return to Solar System"
-        >
-          <span data-icon="orbit"></span><span class="brand-label">Space Explorer</span>
-        </button>
-        <div class="top-actions">
-          <a
-            class="hud-button start-link"
-            href="./"
-            aria-label="Back to Start"
-            title="Back to Start"
-          >
-            <span data-icon="home"></span>
-            <span class="start-link-label">Back to Start</span>
-          </a>
-          <button
-            class="icon-button"
-            id="reset-view"
-            type="button"
-            title="Reset view"
-            aria-label="Reset view"
-          >
-            <span data-icon="reset"></span>
+        <a class="wordmark" href="./" aria-label="Cooper Station, back to start">
+          <span data-icon="orbit"></span><span class="wordmark-text">Cooper Station</span>
+        </a>
+        <div class="clock" role="group" aria-label="Time">
+          <button class="tool" id="toggle-time" type="button" aria-label="Pause time">
+            <span data-icon="pause"></span>
           </button>
           <button
-            class="hud-button"
+            class="tool tool--text"
+            id="time-rate"
+            type="button"
+            aria-label="Speed. Change speed."
+          >
+            10 min/s
+          </button>
+          <output class="date" id="sim-date" aria-label="Simulation date"></output>
+        </div>
+        <div class="tools">
+          <button
+            class="tool"
+            id="toggle-sound"
+            type="button"
+            aria-pressed="true"
+            aria-label="Sound"
+            title="Sound"
+          >
+            <span data-icon="sound"></span>
+          </button>
+          <button
+            class="tool"
+            id="open-settings"
+            type="button"
+            aria-haspopup="dialog"
+            aria-label="Settings"
+            title="Settings"
+          >
+            <span data-icon="settings"></span>
+          </button>
+          <button
+            class="tool"
+            id="open-help"
+            type="button"
+            aria-haspopup="dialog"
+            aria-label="Controls"
+            title="Controls (?)"
+          >
+            <span data-icon="help"></span>
+          </button>
+          <button
+            class="tool tool--text"
             id="open-destinations"
             type="button"
             aria-haspopup="dialog"
+            title="Atlas (M)"
           >
-            <span data-icon="list"></span> Destinations
+            <span data-icon="list"></span><span class="tool-label">Atlas</span>
           </button>
         </div>
       </header>
 
       <div
-        class="zoom-controls"
+        class="view-tools"
         id="zoom-controls"
         role="group"
-        aria-label="Zoom controls"
+        aria-label="View"
       >
         <button
-          class="icon-button"
+          class="tool"
           id="zoom-in"
           type="button"
           aria-label="Zoom in"
@@ -147,7 +170,7 @@
           <span data-icon="plus"></span>
         </button>
         <button
-          class="icon-button"
+          class="tool"
           id="zoom-out"
           type="button"
           aria-label="Zoom out"
@@ -155,155 +178,100 @@
         >
           <span data-icon="minus"></span>
         </button>
+        <button
+          class="tool"
+          id="reset-view"
+          type="button"
+          aria-label="Reset view"
+          title="Reset view (F)"
+        >
+          <span data-icon="reset"></span>
+        </button>
       </div>
 
-      <section class="location" aria-labelledby="location-name">
+      <section class="place panel" id="place" aria-labelledby="location-name">
         <button
-          class="hud-button primary"
-          id="visit-station"
+          class="place-toggle"
+          id="toggle-facts"
           type="button"
-          hidden
-        >
-          Visit Cooper Station <span data-icon="arrow"></span>
-        </button>
-        <div class="station-actions" id="station-actions" hidden>
-          <button class="hud-button primary" id="enter-habitat" type="button">
-            Enter Habitat <span data-icon="arrow"></span>
-          </button>
-          <button
-            class="hud-button primary"
-            id="land-city"
-            type="button"
-            hidden
-          >
-            Land in City <span data-icon="down"></span>
-          </button>
-          <button class="hud-button" id="take-off" type="button" hidden>
-            <span data-icon="up"></span> Take Off
-          </button>
-          <button
-            class="hud-button"
-            id="cutaway"
-            type="button"
-            aria-pressed="false"
-          >
-            <span data-icon="cutaway"></span> Cutaway
-          </button>
-          <button
-            class="hud-button"
-            id="exit-habitat"
-            type="button"
-            aria-label="Return to Orbit"
-            title="Return to Orbit"
-            hidden
-          >
-            <span data-icon="back"></span
-            ><span class="exit-text">Return to Orbit</span>
-          </button>
-          <button
-            class="icon-button"
-            id="open-spin"
-            type="button"
-            aria-label="Rotation controls"
-            title="Rotation controls"
-            aria-expanded="false"
-            aria-controls="spin-panel"
-          >
-            <span data-icon="spin"></span>
-          </button>
-        </div>
-        <h1 id="location-name">Solar System</h1>
-      </section>
-
-      <section
-        class="spin-panel"
-        id="spin-panel"
-        aria-label="Rotation controls"
-        hidden
-      >
-        <div class="spin-heading">
-          <label for="spin">Rotation</label>
-          <output id="spin-value" for="spin">0.53 RPM</output>
-        </div>
-        <input
-          id="spin"
-          type="range"
-          min="0"
-          max="0.85"
-          value="0.53"
-          step="0.01"
-        />
-        <div class="spin-footer">
-          <span
-            >Rim gravity <output id="gravity" for="spin">1.01</output> g</span
-          >
-          <button
-            class="icon-button"
-            id="toggle-spin"
-            type="button"
-            aria-label="Pause rotation"
-            title="Pause rotation"
-          >
-            <span data-icon="pause"></span>
-          </button>
-          <button
-            class="icon-button"
-            id="time-scale"
-            type="button"
-            aria-label="Time scale 1 times"
-            title="Change time scale"
-          >
-            1×
-          </button>
-        </div>
-      </section>
-
-      <div class="reticle" aria-hidden="true"></div>
-      <div class="move-pad" id="move-pad" aria-label="Habitat movement" hidden>
-        <button
-          class="icon-button"
-          data-move="KeyW"
-          type="button"
-          aria-label="Move forward"
-        >
-          <span data-icon="up"></span>
-        </button>
-        <button
-          class="icon-button"
-          data-move="KeyA"
-          type="button"
-          aria-label="Move left"
-        >
-          <span data-icon="left"></span>
-        </button>
-        <button
-          class="icon-button"
-          data-move="KeyS"
-          type="button"
-          aria-label="Move backward"
+          aria-expanded="true"
+          aria-controls="facts"
+          aria-label="Details"
         >
           <span data-icon="down"></span>
         </button>
-        <button
-          class="icon-button"
-          data-move="KeyD"
-          type="button"
-          aria-label="Move right"
-        >
-          <span data-icon="right"></span>
-        </button>
+        <h1 id="location-name">Solar System</h1>
+        <p class="summary" id="location-summary"></p>
+        <dl class="facts" id="facts"></dl>
+        <div class="actions" id="actions">
+          <button class="action action--primary" id="visit-station" type="button" hidden>
+            Visit Cooper Station
+          </button>
+          <div class="action-row" id="station-actions" hidden>
+            <button class="action action--primary" id="enter-habitat" type="button">
+              Enter habitat
+            </button>
+            <button class="action action--primary" id="land-city" type="button" hidden>
+              Land in the city
+            </button>
+            <button class="action" id="take-off" type="button" hidden>Take off</button>
+            <button class="action" id="cutaway" type="button" aria-pressed="false">
+              Cutaway
+            </button>
+            <button class="action" id="exit-habitat" type="button" hidden>
+              Return to orbit
+            </button>
+            <button
+              class="action"
+              id="open-spin"
+              type="button"
+              aria-expanded="false"
+              aria-controls="spin-panel"
+            >
+              Spin
+            </button>
+          </div>
+        </div>
+        <div class="spin-panel" id="spin-panel" hidden>
+          <label class="spin-label" for="spin">Spin rate</label>
+          <input
+            id="spin"
+            type="range"
+            min="0"
+            max="0.85"
+            value="0.53"
+            step="0.01"
+          />
+          <p class="spin-note">
+            Faster spin presses you harder into the floor. Stop it and
+            everything floats.
+          </p>
+        </div>
+      </section>
+
+      <nav class="rail" id="rail" aria-label="Solar System route" hidden></nav>
+
+      <p class="hint" id="hint" role="status" aria-live="polite" hidden></p>
+      <div class="reticle" aria-hidden="true"></div>
+      <div
+        class="stick"
+        id="stick"
+        role="application"
+        aria-label="Movement stick. Drag to move. On a keyboard, use W A S D."
+        hidden
+      >
+        <span class="stick-knob" id="stick-knob"></span>
       </div>
+      <button class="tool tool--text restore" id="show-hud" type="button" hidden>
+        Show controls
+      </button>
     </main>
 
-    <dialog id="destinations" aria-labelledby="destinations-title">
-      <div class="catalog-header">
-        <h2 id="destinations-title">Destinations</h2>
+    <dialog class="sheet" id="destinations" aria-labelledby="destinations-title">
+      <div class="sheet-header">
+        <h2 id="destinations-title">Atlas</h2>
         <form method="dialog">
-          <button
-            class="icon-button"
-            type="submit"
-            aria-label="Close destinations"
-          >
+          <button class="tool" type="submit" aria-label="Close atlas">
             <span data-icon="close"></span>
           </button>
         </form>
@@ -315,8 +283,7 @@
           target="_blank"
           rel="noopener"
           >Planet maps by Solar System Scope</a
-        >
-        ·
+        >,
         <a
           href="https://creativecommons.org/licenses/by/4.0/"
           target="_blank"
@@ -329,13 +296,76 @@
           >NASA/Goddard Space Flight Center Scientific Visualization Studio</a
         >. Gaia DR2: ESA/Gaia/DPAC.
         <br />
+        Planetary data:
+        <a
+          href="https://nssdc.gsfc.nasa.gov/planetary/factsheet/"
+          target="_blank"
+          rel="noopener"
+          >NASA Planetary Fact Sheets</a
+        >. Gargantua is modelled as a non-rotating black hole.
+        <br />
         <a
           href="https://www.space.com/27316-interstellar-space-epic-movie-photos.html"
           target="_blank"
           rel="noopener"
           >Interstellar stills</a
-        > by Paramount Pictures and Warner Bros.
+        >
+        by Paramount Pictures and Warner Bros.
       </p>
+    </dialog>
+
+    <dialog class="sheet" id="help" aria-labelledby="help-title">
+      <div class="sheet-header">
+        <h2 id="help-title">Controls</h2>
+        <form method="dialog">
+          <button class="tool" type="submit" aria-label="Close controls">
+            <span data-icon="close"></span>
+          </button>
+        </form>
+      </div>
+      <dl class="keys">
+        <div><dt>Drag</dt><dd>Look around</dd></div>
+        <div><dt>Scroll or pinch</dt><dd>Zoom</dd></div>
+        <div><dt>Click a planet</dt><dd>Fly to it</dd></div>
+        <div><dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Previous or next planet</dd></div>
+        <div><dt><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></dt><dd>Move inside the station</dd></div>
+        <div><dt><kbd>Shift</kbd></dt><dd>Move faster</dd></div>
+        <div><dt><kbd>Q</kbd> <kbd>E</kbd></dt><dd>Fly lower or higher</dd></div>
+        <div><dt><kbd>Space</kbd></dt><dd>Pause or resume time</dd></div>
+        <div><dt><kbd>F</kbd></dt><dd>Reset the view</dd></div>
+        <div><dt><kbd>H</kbd></dt><dd>Hide or show controls</dd></div>
+        <div><dt><kbd>M</kbd></dt><dd>Open the atlas</dd></div>
+      </dl>
+    </dialog>
+
+    <dialog class="sheet" id="settings" aria-labelledby="settings-title">
+      <div class="sheet-header">
+        <h2 id="settings-title">Settings</h2>
+        <form method="dialog">
+          <button class="tool" type="submit" aria-label="Close settings">
+            <span data-icon="close"></span>
+          </button>
+        </form>
+      </div>
+      <fieldset class="choice" id="quality">
+        <legend>Picture quality</legend>
+        <label><input type="radio" name="quality" value="auto" />Auto</label>
+        <label><input type="radio" name="quality" value="high" />High</label>
+        <label><input type="radio" name="quality" value="balanced" />Balanced</label>
+        <label><input type="radio" name="quality" value="low" />Low</label>
+      </fieldset>
+      <p class="sheet-note">
+        Auto lowers quality only when frames are being dropped.
+      </p>
+      <label class="switch">
+        <input id="setting-guides" type="checkbox" />
+        Orbit lines and labels
+      </label>
+      <label class="switch">
+        <input id="setting-sound" type="checkbox" />
+        Sound
+      </label>
+      <button class="action" id="hide-hud" type="button">Hide controls</button>
     </dialog>
 
     <script type="module" src="/src/main.ts"></script>
