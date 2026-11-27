@@ -107,3 +107,51 @@ describe("tier settings", () => {
     expect(tierSettings.low.bloom).toBe(false);
   });
 });
+
+import { createPacer } from "./quality";
+
+describe("frame pacer", () => {
+  const feedPacer = (pacer: ReturnType<typeof createPacer>, interval: number, frames: number) => {
+    let behind = 1;
+    for (let i = 0; i < frames; i++) behind = pacer.observe(interval);
+    return behind;
+  };
+
+  it("reads a steady 60 Hz stream as keeping up", () => {
+    expect(feedPacer(createPacer(), 16.67, 120)).toBeCloseTo(1, 1);
+  });
+
+  it("reads a steady 120 Hz stream as keeping up", () => {
+    expect(feedPacer(createPacer(), 8.33, 240)).toBeCloseTo(1, 1);
+  });
+
+  it("is not fooled by one short gap between frames", () => {
+    const pacer = createPacer();
+    feedPacer(pacer, 16.67, 120);
+    pacer.observe(3);
+    expect(feedPacer(pacer, 16.67, 10)).toBeCloseTo(1, 1);
+  });
+
+  it("ignores a timestamp that runs backwards", () => {
+    const pacer = createPacer();
+    feedPacer(pacer, 16.67, 120);
+    expect(pacer.observe(-900)).toBe(1);
+    expect(feedPacer(pacer, 16.67, 10)).toBeCloseTo(1, 1);
+  });
+
+  it("reports half speed on a 60 Hz display as twice behind", () => {
+    const pacer = createPacer();
+    feedPacer(pacer, 16.67, 120);
+    expect(feedPacer(pacer, 33.3, 60)).toBeCloseTo(2, 1);
+  });
+
+  it("assumes at least 60 Hz when it has only ever seen slow frames", () => {
+    expect(feedPacer(createPacer(), 33.3, 300)).toBeCloseTo(2, 1);
+  });
+
+  it("notices a 120 Hz display dropping to 60", () => {
+    const pacer = createPacer();
+    feedPacer(pacer, 8.33, 240);
+    expect(feedPacer(pacer, 16.67, 40)).toBeGreaterThan(1.5);
+  });
+});

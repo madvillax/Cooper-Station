@@ -118,3 +118,34 @@ export function createGovernor(options: { initial: Tier; upThreshold: number }) 
     },
   };
 }
+
+const PACER_FRAMES = 31;
+
+/**
+ * Works out how far behind the display the renderer is running: 1 means a
+ * frame arrived for every refresh, 2 means every other one.
+ *
+ * The display's refresh interval is not something a page can ask for, so it is
+ * taken as the typical (median) gap between recent frames, remembered at its
+ * lowest. Using the median matters: browsers often deliver a late frame and
+ * then the next one almost immediately, and a single short gap like that must
+ * not be mistaken for a faster display. The estimate drifts back up slowly, in
+ * case the window moved to a slower screen, and never above 60 Hz's 16.7 ms.
+ */
+export function createPacer() {
+  const recent: number[] = [];
+  let display = 16.7;
+  return {
+    /** Takes the gap since the previous frame, in milliseconds. */
+    observe(interval: number) {
+      // Clocks can step backwards (a timestamp taken before the frame was
+      // scheduled); such a gap says nothing.
+      if (!(interval > 0)) return 1;
+      recent.push(interval);
+      if (recent.length > PACER_FRAMES) recent.shift();
+      const typical = [...recent].sort((a, b) => a - b)[recent.length >> 1];
+      display = Math.min(16.7, Math.max(6.9, Math.min(display * 1.002, typical)));
+      return interval / display;
+    },
+  };
+}

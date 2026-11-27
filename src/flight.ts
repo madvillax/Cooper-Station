@@ -14,7 +14,12 @@ import { attachInput, type Action } from "./input";
 import { stepSpring, type Spring } from "./spring";
 import { DEFAULT_RPM, daysSinceJ2000, radiansPerSecond } from "./physics";
 import { createPost } from "./post";
-import { createGovernor, tierSettings, type Tier } from "./quality";
+import {
+  createGovernor,
+  createPacer,
+  tierSettings,
+  type Tier,
+} from "./quality";
 import { createStation } from "./station";
 import {
   macrotask,
@@ -338,16 +343,15 @@ export async function startFlight({
   let viewportHeight = 1;
   let maximumRatio = 1;
   let lastDraw = 0;
-  let displayInterval = 16.7;
+  const pacer = createPacer();
   let lastSunAngle = Infinity;
 
   // Quality follows measured load. Real GPU timings are used where the browser
   // exposes them; otherwise load is inferred from the time between frames.
   const gl = renderer.getContext() as WebGL2RenderingContext;
-  const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2") as {
-    TIME_ELAPSED_EXT: number;
-    GPU_DISJOINT_EXT: number;
-  } | null;
+  type TimerExtension = { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number };
+  const timerName = "EXT_disjoint_timer_query_webgl2";
+  let timer = gl.getExtension(timerName) as TimerExtension | null;
   const GPU_BUDGET_MS = 11;
   /** Dev only: raw GPU milliseconds per timed frame, read by scripts/bench.js. */
   const gpuSamples: number[] = [];
@@ -662,10 +666,7 @@ export async function startFlight({
     const previous = lastDraw;
     lastDraw = now;
     if (previous <= 0) return;
-    const interval = now - previous;
-    // The display's interval is the shortest gap seen recently.
-    displayInterval = clamp(Math.min(displayInterval + 0.002, interval), 6.9, 16.7);
-    const behind = interval / displayInterval;
+    const behind = pacer.observe(now - previous);
     const load =
       behind <= 1.08
         ? // Keeping up. How light it is comes from the GPU timer where there is
@@ -1316,8 +1317,11 @@ export async function startFlight({
   });
   renderer.domElement.addEventListener("webglcontextrestored", () => {
     lastSunAngle = Infinity;
+    // Extensions belong to the context that was lost; ask again.
+    timer = gl.getExtension(timerName) as TimerExtension | null;
     gpuQuery = null;
     gpuQueryOpen = false;
+    gpuLoad = 1;
     daylight.shadow.needsUpdate = true;
     reflection?.dispose();
     reflection = stationReflections(renderer);
