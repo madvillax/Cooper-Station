@@ -45,11 +45,23 @@ export function createLaunchStarfield(canvas: HTMLCanvasElement) {
   let seconds = 0;
   let lastTime = 0;
   let frame: number | undefined;
+  // 1 is the resting drift. The launch sequence raises it, and past about
+  // 1.5 each star is drawn as a streak pointing away from the vanishing point.
+  let speed = 1;
+  let speedTarget = 1;
 
   function draw(delta = 0) {
     if (!width || !height) return;
     ink.clearRect(0, 0, width, height);
-    const expansion = expansionRates.map((rate) => Math.exp(rate * delta));
+    speed += (speedTarget - speed) * (1 - Math.exp(-delta * 1.6));
+    const expansion = expansionRates.map((rate) =>
+      Math.exp(rate * delta * speed),
+    );
+    const streaking = speed > 1.5;
+    if (streaking) {
+      ink.strokeStyle = "#fff";
+      ink.lineCap = "round";
+    }
     const marginX = padding / width;
     const marginY = padding / height;
     for (let index = 0; index < count; index++) {
@@ -72,7 +84,22 @@ export function createLaunchStarfield(canvas: HTMLCanvasElement) {
         ? 1 - star.twinkle * (0.5 + 0.5 * Math.sin(seconds * 1.9 + star.phase))
         : 1;
       ink.globalAlpha = star.brightness * shimmer * Math.min(1, star.age * 1.6);
-      ink.drawImage(star.sprite, star.x * width - half, star.y * height - half, diameter, diameter);
+      const x = star.x * width;
+      const y = star.y * height;
+      if (streaking) {
+        // Nearer stars smear further, like rain on a windscreen at speed.
+        const stretch = Math.min(0.24, 0.011 * speed * (star.depth + 1));
+        ink.lineWidth = Math.max(1, diameter * 0.26);
+        ink.beginPath();
+        ink.moveTo(
+          x - (x - vanishingPoint.x * width) * stretch,
+          y - (y - vanishingPoint.y * height) * stretch,
+        );
+        ink.lineTo(x, y);
+        ink.stroke();
+      } else {
+        ink.drawImage(star.sprite, x - half, y - half, diameter, diameter);
+      }
     }
   }
 
@@ -120,6 +147,10 @@ export function createLaunchStarfield(canvas: HTMLCanvasElement) {
 
   const observer = new ResizeObserver(resize);
   return {
+    /** Sets how fast the field rushes outward; it eases there over a second or so. */
+    setSpeed(multiplier: number) {
+      speedTarget = multiplier;
+    },
     setActive(visible: boolean, moving: boolean) {
       if (visible) {
         resize();

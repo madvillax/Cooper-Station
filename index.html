@@ -67,9 +67,21 @@
       <div class="launch-content">
         <h1 id="launch-title">Beyond the horizon.</h1>
         <button class="launch-button" id="enter-space" type="button">
-          <span id="enter-label">Enter Space</span>
+          <span id="enter-label">Enter space</span>
           <span class="launch-arrow" data-icon="arrow"></span>
         </button>
+        <div class="launch-progress" id="launch-progress" hidden>
+          <p class="launch-status" id="launch-status" role="status">
+            Loading star catalogue
+          </p>
+          <div class="launch-bar" aria-hidden="true">
+            <span id="launch-bar"></span>
+          </div>
+        </div>
+        <label class="launch-sound">
+          <input id="launch-sound" type="checkbox" checked />
+          Sound
+        </label>
         <p class="launch-error" id="graphics-message" role="status" hidden>
           The 3D viewer needs WebGL 2. Enable graphics acceleration in your
           browser to enter.

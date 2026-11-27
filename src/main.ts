@@ -15,6 +15,7 @@ import reset from "@tabler/icons/outline/focus-2.svg?raw";
 import settingsIcon from "@tabler/icons/outline/adjustments-horizontal.svg?raw";
 import soundOff from "@tabler/icons/outline/volume-off.svg?raw";
 import soundOn from "@tabler/icons/outline/volume.svg?raw";
+import { createAudio } from "./audio";
 import { DEFAULT_SOLAR_RATE, facts, timeRates } from "./bodies-data";
 import {
   destinationGroups,
@@ -24,6 +25,7 @@ import {
   type Destination,
   type View,
 } from "./destinations";
+import { resetEntry, runEntry } from "./entry";
 import type { startFlight, Telemetry } from "./flight";
 import { formatDate, formatDilation, formatRate } from "./format";
 import {
@@ -110,6 +112,14 @@ let launchStars: ReturnType<typeof createLaunchStarfield>;
 let cameraRadiusInRs = 25;
 let lastReadout = 0;
 
+const audio = createAudio();
+const launchSound = get("launch-sound", HTMLInputElement);
+const entryParts = {
+  launch,
+  progress: get("launch-progress"),
+  status: get("launch-status"),
+  bar: get("launch-bar"),
+};
 const hints = createHints(get("hint"));
 const labels = createLabels(get("labels"), selectDestination);
 const rail = createRail(railNav, orbit, selectDestination);
@@ -249,6 +259,7 @@ function showLocation() {
   stickPad.hidden = !within;
   railNav.hidden = !isSolarDestination(destination);
   rail.setCurrent(destination);
+  audio.setPlace(grounded ? "city" : within ? "habitat" : "space");
   for (const [id, button] of destinationButtons) {
     if (id === destination) button.setAttribute("aria-current", "true");
     else button.removeAttribute("aria-current");
@@ -265,6 +276,7 @@ function selectDestination(next: Destination) {
   for (const sheet of sheets) if (sheet.open) sheet.close();
   flight?.setDestination(next);
   if (destination !== next) {
+    audio.tick();
     if (destination === "system") hints.did("pick");
     destination = next;
     stationView = "orbital";
@@ -277,6 +289,7 @@ function selectDestination(next: Destination) {
 
 function selectStationView(next: View) {
   stationView = next;
+  audio.tick();
   flight?.setView(next);
   setSpinPanel(false);
   showLocation();
@@ -317,6 +330,7 @@ function syncClock() {
 
 function toggleTime() {
   playing = !playing;
+  audio.tick();
   syncClock();
 }
 
@@ -327,6 +341,8 @@ function setSound(on: boolean) {
   soundToggle.innerHTML = on ? soundOn : soundOff;
   soundToggle.title = on ? "Sound on" : "Sound off";
   get("setting-sound", HTMLInputElement).checked = on;
+  launchSound.checked = on;
+  audio.setEnabled(on);
 }
 
 function setGuides(on: boolean) {
@@ -370,82 +386,110 @@ function graphicsChanged(ready: boolean) {
   explorer.hidden = !ready;
   explorer.inert = !ready;
   launch.inert = ready;
-  if (!ready) launch.hidden = false;
+  if (!ready) {
+    launch.hidden = false;
+    resetEntry({ ...entryParts, stars: launchStars });
+  }
   syncLaunchMotion();
   get("graphics-message").hidden = ready;
   enterSpace.disabled = false;
-  get("enter-label").textContent = "Enter Space";
   if (ready) {
     saveLocation();
     world.focus({ preventScroll: true });
     hints.offer("look");
     if (launch.hidden) return;
-    if (reducedMotion.matches) launch.hidden = true;
-    else {
-      const fade = launch.animate([{ opacity: 1 }, { opacity: 0 }], {
-        duration: 430,
-        easing: "ease-out",
-      });
-      void fade.finished.then(() => {
-        launch.hidden = !explorer.hidden;
-      });
-    }
+    // A fade is not motion, so it stays (shorter) under reduced motion.
+    const fade = launch.animate([{ opacity: 1 }, { opacity: 0 }], {
+      duration: reducedMotion.matches ? 220 : 620,
+      easing: "ease-out",
+    });
+    void fade.finished.then(() => {
+      launch.hidden = !explorer.hidden;
+      resetEntry({ ...entryParts, stars: launchStars });
+    });
   } else {
     for (const sheet of sheets) if (sheet.open) sheet.close();
   }
 }
 
-function startExplorer() {
+/**
+ * Builds the 3D view behind the launch page. `cinematic` is the visitor
+ * pressing Enter; a deep link or reload shows progress without the show.
+ */
+function startExplorer(cinematic: boolean) {
   if (flight || enterSpace.disabled) return;
   enterSpace.disabled = true;
   get("graphics-message").hidden = true;
-  get("enter-label").textContent = "Entering Space…";
   // Laid out so the canvas can be sized, but not usable until the view exists:
   // a control used now would change the HUD and not the scene.
   explorer.hidden = false;
   explorer.inert = true;
-  void import("./flight")
-    .then(({ startFlight }) =>
-      startFlight({
-        host: world,
-        initialDestination: destination,
-        initialView: stationView,
-        onGraphics: graphicsChanged,
-        onProgress: (fraction, label) => {
-          get("enter-label").textContent =
-            `${label} ${Math.round(fraction * 100)}%`;
-        },
-        onFrame,
-        onAction(action) {
-          if (action === "toggle-time") toggleTime();
-          else if (action === "toggle-hud") {
-            setHudHidden(!explorer.classList.contains("bare"));
-          } else if (action === "open-atlas") open(atlas);
-          else open(helpSheet);
-        },
-        allowControls: () => !sheets.some((sheet) => sheet.open),
-        onSelectBody: selectDestination,
-        onRouteStop: (next) => {
-          destination = next;
-          showLocation();
-          saveLocation();
-        },
-      }),
-    )
+
+  let reportProgress = (_fraction: number, _label: string) => {};
+  let unveiled = false;
+  const building = import("./flight").then(({ startFlight }) =>
+    startFlight({
+      host: world,
+      initialDestination: destination,
+      initialView: stationView,
+      // The first "ready" belongs to the launch sequence below. Later calls
+      // are the graphics context being lost or restored.
+      onGraphics: (ready) => {
+        if (unveiled) graphicsChanged(ready);
+      },
+      onProgress: (fraction, label) => reportProgress(fraction, label),
+      onFrame,
+      onAction(action) {
+        if (action === "toggle-time") toggleTime();
+        else if (action === "toggle-hud") {
+          setHudHidden(!explorer.classList.contains("bare"));
+        } else if (action === "open-atlas") open(atlas);
+        else open(helpSheet);
+      },
+      allowControls: () => !sheets.some((sheet) => sheet.open),
+      onSelectBody: selectDestination,
+      onRouteStop: (next) => {
+        destination = next;
+        showLocation();
+        saveLocation();
+      },
+    }),
+  );
+  void runEntry({
+    ...entryParts,
+    stars: launchStars,
+    cinematic,
+    reducedMotion: reducedMotion.matches,
+    ready: building.then(() => {}),
+    onProgress: (listener) => {
+      reportProgress = listener;
+    },
+  })
+    .then(() => building)
     .then((started) => {
       flight = started;
       if (import.meta.env.DEV) Object.assign(window, { __flight: started });
       flight.setQuality(settings.quality);
       flight.setGuides(settings.guides);
       syncClock();
+      unveiled = true;
+      graphicsChanged(true);
+      // Start the arrival sweep now, as the launch page lifts off it.
+      flight.establish();
     })
     .catch((error: unknown) => {
       console.error("Unable to start the 3D viewer", error);
+      unveiled = true;
       graphicsChanged(false);
     });
 }
 
-enterSpace.addEventListener("click", () => startExplorer());
+enterSpace.addEventListener("click", () => startExplorer(true));
+launchSound.addEventListener("change", () => setSound(launchSound.checked));
+// Browsers allow sound only after a click or key press; the first one starts it.
+for (const gesture of ["pointerdown", "keydown"] as const) {
+  document.addEventListener(gesture, () => audio.start(), { once: true });
+}
 window.addEventListener("hashchange", () => location.reload());
 
 get("reset-view").addEventListener("click", () => flight?.reset());
@@ -536,4 +580,4 @@ setSound(settings.sound);
 get("setting-guides", HTMLInputElement).checked = settings.guides;
 showLocation();
 syncLaunchMotion();
-if (resumeLocation) startExplorer();
+if (resumeLocation) startExplorer(false);

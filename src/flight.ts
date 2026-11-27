@@ -1446,6 +1446,13 @@ export async function startFlight({
       if (x || y) touched();
       dirty = true;
     },
+    /** Replays the wide-to-close arrival sweep, for when the view is unveiled. */
+    establish() {
+      if (isHabitatView(view)) return;
+      orbit = { ...orbitTarget };
+      establish();
+      dirty = true;
+    },
     hop(direction: 1 | -1) {
       touched();
       if (isSolarDestination(destination)) advanceSolarRoute(direction);

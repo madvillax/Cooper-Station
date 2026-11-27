@@ -242,6 +242,66 @@ a {
 .launch-button:disabled {
   opacity: 0.72;
 }
+.launch-progress {
+  width: min(320px, 78vw);
+}
+.launch-status {
+  margin: 0 0 10px;
+  font-family: var(--numerals);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.launch-bar {
+  height: 2px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+.launch-bar span {
+  display: block;
+  height: 100%;
+  background: var(--amber);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 260ms ease-out;
+}
+.launch-sound {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.launch-sound input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--amber);
+}
+/* Loading: the button and the sound choice make way for the progress line. */
+.launch.is-loading :is(.launch-button, .launch-sound) {
+  display: none;
+}
+/* Launching: the photos drift apart and out, as if left behind. Only
+   transform and opacity change, so the compositor runs it without the main
+   thread, which is busy building the station at this moment. */
+.launch-photo,
+.launch-content h1 {
+  transition:
+    transform 1900ms cubic-bezier(0.5, 0, 0.9, 0.4),
+    opacity 1500ms ease-in;
+}
+.launch.is-launching .launch-photo {
+  opacity: 0;
+  transform: translate(
+      calc(-50% + (var(--photo-x) - 50%) * 9),
+      calc(-50% + (var(--photo-y) - 50%) * 9)
+    )
+    rotate(var(--photo-tilt)) scale(1.9);
+}
+.launch.is-launching .launch-content h1 {
+  opacity: 0;
+}
 .launch-error {
   max-width: 350px;
   margin: 0;
