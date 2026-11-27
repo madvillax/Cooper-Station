@@ -5,7 +5,8 @@ import {
   type Destination,
   type SolarDestination,
 } from "./destinations";
-import { makeSolarCorona } from "./environment";
+import { loadTexture, makeSolarCorona } from "./environment";
+import type { Stage } from "./warmup";
 
 type BodyId = (typeof planets)[number]["id"] | "sun" | "moon";
 const sunDirection = new THREE.Vector3(-0.9, 0.38, 0.62).normalize();
@@ -13,12 +14,15 @@ const sphere = new THREE.SphereGeometry(1, 96, 64);
 const systemSun = new THREE.Vector3(-8, 1.7, -13);
 const systemPlaneTilt = 0.26;
 
-export function createAtlas(invalidate: () => void) {
+export function createAtlas(
+  invalidate: () => void,
+  upload: (texture: THREE.Texture) => void,
+) {
   const root = new THREE.Group();
   const system = new THREE.Group();
   const close = new THREE.Group();
   const bodies = new Map<BodyId, ReturnType<typeof body>>();
-  const loader = new THREE.TextureLoader();
+  const textureJobs = new Map<string, () => Promise<void>>();
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const sunlight = new THREE.Vector3();
@@ -35,13 +39,37 @@ export function createAtlas(invalidate: () => void) {
   );
   emptyTexture.needsUpdate = true;
 
+  // Maps load on request, not at creation, so entry decides what it waits for.
   function texture(name: string, onLoad: (image: THREE.Texture) => void) {
-    loader.load(`${import.meta.env.BASE_URL}space/${name}.webp`, (image) => {
-      image.colorSpace = THREE.SRGBColorSpace;
-      image.anisotropy = 4;
-      onLoad(image);
-      invalidate();
+    let loading: Promise<void> | undefined;
+    textureJobs.set(name, () => {
+      loading ??= loadTexture(
+        `${import.meta.env.BASE_URL}space/${name}.webp`,
+      ).then((image) => {
+        image.anisotropy = 4;
+        upload(image);
+        onLoad(image);
+        invalidate();
+      });
+      return loading;
     });
+  }
+
+  /** Saturn hangs behind the station, so the station view needs only its maps. */
+  function textureStages(group: "station" | "system"): Stage[] {
+    return [...textureJobs]
+      .filter(([name]) => group === "system" || name.startsWith("saturn"))
+      .map(([name, run]) => ({
+        label: "Loading star catalogue",
+        weight: name === "jupiter" || name === "saturn" ? 2 : 1,
+        optional: true,
+        run,
+      }));
+  }
+
+  /** Begins downloads and decodes without waiting, so they overlap other work. */
+  function preload(group: "station" | "system") {
+    for (const stage of textureStages(group)) void Promise.resolve(stage.run()).catch(() => {});
   }
 
   function body(id: BodyId, color: number, tilt = 0) {
@@ -368,6 +396,30 @@ export function createAtlas(invalidate: () => void) {
     return hit && pickTargets.get(hit.object);
   }
 
+  /** Draws with every group showing, so each one's GPU state exists up front. */
+  function warm(draw: () => void) {
+    const shown = current;
+    system.visible = close.visible = galaxy.visible = blackHole.mesh.visible = true;
+    for (const item of bodies.values()) item.frame.visible = true;
+    if (uranusRing) uranusRing.visible = true;
+    draw();
+    setView(
+      shown === "galaxy" || shown === "blackhole" || shown === "station"
+        ? shown
+        : "system",
+    );
+  }
+
   setView("system");
-  return { root, setView, update, faceCamera, getBody, pickBody };
+  return {
+    root,
+    setView,
+    update,
+    faceCamera,
+    getBody,
+    pickBody,
+    textureStages,
+    preload,
+    warm,
+  };
 }

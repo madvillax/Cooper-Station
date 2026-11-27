@@ -24,6 +24,26 @@ export function canvasTexture(
   return texture;
 }
 
+/**
+ * Loads an image as a texture, decoding it off the main thread where the
+ * browser allows, so a large map never stalls a frame while it decodes.
+ */
+export async function loadTexture(url: string) {
+  let texture: THREE.Texture;
+  if (typeof createImageBitmap === "function") {
+    const loader = new THREE.ImageBitmapLoader();
+    loader.setOptions({ imageOrientation: "flipY", premultiplyAlpha: "none" });
+    texture = new THREE.Texture(await loader.loadAsync(url));
+    // The bitmap is already flipped; WebGL cannot flip one at upload.
+    texture.flipY = false;
+  } else {
+    texture = await new THREE.TextureLoader().loadAsync(url);
+  }
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export function makeStarField() {
   const random = seededRandom(618);
   const positions = [];
@@ -173,7 +193,10 @@ export function makeSolarCorona() {
   };
 }
 
-export function makeSkyDome(invalidate: () => void) {
+export function makeSkyDome(
+  invalidate: () => void,
+  upload: (texture: THREE.Texture) => void,
+) {
   const orientation = new THREE.Matrix3().setFromMatrix4(
     new THREE.Matrix4().makeRotationFromEuler(
       new THREE.Euler(0.48, -1.55, 0.22),
@@ -218,21 +241,25 @@ export function makeSkyDome(invalidate: () => void) {
   // Opaque geometry can depth-reject the sky before its panorama is sampled.
   mesh.renderOrder = 10;
   mesh.visible = false;
-  new THREE.TextureLoader().load(
-    `${import.meta.env.BASE_URL}space/deep-sky.webp`,
-    (texture) => {
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.wrapS = THREE.RepeatWrapping;
-      texture.anisotropy = 8;
-      material.uniforms.panorama.value = texture;
-      mesh.visible = true;
-      invalidate();
-    },
-  );
+  let loading: Promise<void> | undefined;
   return {
     mesh,
     setExposure(exposure: number) {
       material.uniforms.exposure.value = exposure;
+    },
+    /** Starts (once) and resolves when the panorama is on the GPU. */
+    load() {
+      loading ??= loadTexture(
+        `${import.meta.env.BASE_URL}space/deep-sky.webp`,
+      ).then((texture) => {
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.anisotropy = 8;
+        upload(texture);
+        material.uniforms.panorama.value = texture;
+        mesh.visible = true;
+        invalidate();
+      });
+      return loading;
     },
   };
 }

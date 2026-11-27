@@ -11,6 +11,14 @@ import { makeSkyDome, makeStarField } from "./environment";
 import { DEFAULT_RPM, radiansPerSecond } from "./physics";
 import { createStation } from "./station";
 import {
+  macrotask,
+  runStages,
+  warmGroup,
+  warmOrder,
+  type Stage,
+  type WarmGroup,
+} from "./warmup";
+import {
   CITY_DECK,
   CITY_LANDING,
   cityCoordinates,
@@ -92,11 +100,12 @@ function stationReflections(renderer: THREE.WebGLRenderer) {
   return reflection;
 }
 
-export function startFlight({
+export async function startFlight({
   host,
   initialDestination,
   initialView,
   onGraphics,
+  onProgress,
   allowControls,
   onSelectBody,
   onRouteStop,
@@ -105,6 +114,8 @@ export function startFlight({
   initialDestination: Destination;
   initialView: View;
   onGraphics: (available: boolean) => void;
+  /** Warm-up progress from 0 to 1, with a short label for the current step. */
+  onProgress?: (fraction: number, label: string) => void;
   allowControls: () => boolean;
   onSelectBody: (destination: Destination) => void;
   onRouteStop: (destination: SolarDestination) => void;
@@ -121,30 +132,43 @@ export function startFlight({
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.domElement.setAttribute("aria-hidden", "true");
 
+  // Everything that feeds a shader's cache key is fixed for the whole session:
+  // the fog object, each material's clipping-plane count, the lights in the
+  // scene and which of them cast shadows. Views differ only in numbers (fog
+  // density, plane distance, light and shadow intensity), so changing view
+  // never recompiles a shader.
   const scene = new THREE.Scene();
-  const atmosphere = new THREE.FogExp2(0x85989a, 0.069);
+  const atmosphere = new THREE.FogExp2(0x85989a, 0);
+  scene.fog = atmosphere;
   let reflection: THREE.WebGLRenderTarget | undefined;
   scene.environmentIntensity = 0.71;
   const camera = new THREE.PerspectiveCamera(42, 1, 0.012, 450);
-  const station = createStation();
+  const invalidate = () => {
+    dirty = true;
+  };
+  const upload = (texture: THREE.Texture) => renderer.initTexture(texture);
+  const entryGroup = warmGroup(initialDestination);
+  const atlas = createAtlas(invalidate, upload);
+  const stars = makeStarField();
+  const sky = makeSkyDome(invalidate, upload);
+  // Start downloads now so decoding overlaps the station build.
+  void sky.load().catch(() => {});
+  atlas.preload(entryGroup === "system" ? "system" : "station");
+  const station = await createStation((fraction, label) =>
+    onProgress?.(fraction * 0.5, label),
+  );
   const cutPlane = new THREE.Plane();
-  const terrainMaterials = new Set<THREE.Material>();
+  const cutNowhere = new THREE.Vector3(0, 1, 0);
+  cutPlane.set(cutNowhere, 1e6);
   station.landscape.traverse((object) => {
     if (
       object instanceof THREE.Mesh &&
       object.material instanceof THREE.Material
     ) {
-      terrainMaterials.add(object.material);
+      object.material.clippingPlanes = [cutPlane];
     }
   });
-  const atlas = createAtlas(() => {
-    dirty = true;
-  });
-  station.root.visible = false;
-  const stars = makeStarField();
-  const sky = makeSkyDome(() => {
-    dirty = true;
-  });
+  station.visuals.visible = false;
   const ambient = new THREE.HemisphereLight(0xd4e8ff, 0x384451, 1.3);
   scene.add(
     sky.mesh,
@@ -165,6 +189,8 @@ export function startFlight({
   sun.shadow.bias = -0.00016;
   sun.shadow.normalBias = 0.008;
   sun.shadow.autoUpdate = false;
+  sun.castShadow = true;
+  sun.shadow.intensity = 0;
   const bounce = new THREE.DirectionalLight(0x9fc7ff, 1.04);
   bounce.position.set(5, -2, -8);
   const interior = new THREE.PointLight(0xffe5c5, 0, 18, 1.64);
@@ -178,6 +204,9 @@ export function startFlight({
   daylight.shadow.bias = -0.000036;
   daylight.shadow.normalBias = 0.00013;
   daylight.shadow.autoUpdate = false;
+  daylight.castShadow = true;
+  daylight.shadow.intensity = 0;
+  let cityShadows = false;
   station.spin.add(interior, daylight, daylight.target);
   scene.add(sun, bounce);
 
@@ -290,10 +319,7 @@ export function startFlight({
     wheelDistance = 0;
     keys.clear();
     setCutaway(false);
-    station.root.visible = next === "station";
-    scene.environment = station.root.visible
-      ? (reflection ??= stationReflections(renderer)).texture
-      : null;
+    station.visuals.visible = next === "station";
     if (!movingWithinSystem) atlas.setView(nextSolar ? "system" : next);
     orbitTarget = initialOrbit();
     orbit = {
@@ -436,11 +462,8 @@ export function startFlight({
   function setCutaway(enabled: boolean) {
     if (isCutaway === enabled) return;
     isCutaway = enabled;
-    for (const material of terrainMaterials) {
-      material.clippingPlanes = enabled ? [cutPlane] : null;
-      material.needsUpdate = true;
-    }
     if (!enabled) {
+      cutPlane.set(cutNowhere, 1e6);
       for (const panel of station.removablePanels) panel.visible = true;
     }
   }
@@ -743,12 +766,13 @@ export function startFlight({
       dirty = true;
     }
     atmosphere.density = habitatLight * 0.069;
-    scene.fog = habitatLight > 0 ? atmosphere : null;
     adaptResolution(now);
     const detailedLighting = pixelRatio >= Math.min(0.86, maximumRatio * 0.78);
-    sun.castShadow = detailedLighting && destination === "station" && !inside && !isCutaway;
+    const sunShadows =
+      detailedLighting && destination === "station" && !inside && !isCutaway;
+    sun.shadow.intensity = sunShadows ? 1 : 0;
     const spinAngle = station.spin.rotation.z;
-    if (sun.castShadow) {
+    if (sunShadows) {
       const angleChange = Math.abs(spinAngle - lastSunAngle);
       if (now - lastSunUpdate >= 42 && angleChange >= 0.007) {
         sun.shadow.needsUpdate = true;
@@ -757,10 +781,11 @@ export function startFlight({
       }
     }
     if (destination === "station") {
-      bounce.visible = detailedLighting;
       ambient.intensity = isCutaway ? 1.05 : THREE.MathUtils.lerp(0.59, 1.05, habitatLight);
       sun.intensity = THREE.MathUtils.lerp(3.35, 0.48, habitatLight);
-      bounce.intensity = THREE.MathUtils.lerp(0.82, 0.34, habitatLight);
+      bounce.intensity = detailedLighting
+        ? THREE.MathUtils.lerp(0.82, 0.34, habitatLight)
+        : 0;
       interior.intensity = isCutaway ? 20 : THREE.MathUtils.lerp(11, 20, habitatLight);
       daylight.intensity = 1.42 * habitatLight;
       const extent = view === "ground" ? 0.28 : 1.19;
@@ -771,9 +796,10 @@ export function startFlight({
         shadow.updateProjectionMatrix();
         daylight.shadow.needsUpdate = true;
       }
-      const cityShadows = inside && detailedLighting;
-      if (cityShadows !== daylight.castShadow) {
-        daylight.castShadow = cityShadows;
+      const wantCityShadows = inside && detailedLighting;
+      if (wantCityShadows !== cityShadows) {
+        cityShadows = wantCityShadows;
+        daylight.shadow.intensity = cityShadows ? 1 : 0;
         station.city.setShadowCasting(cityShadows);
         daylight.shadow.needsUpdate = cityShadows;
       }
@@ -785,7 +811,6 @@ export function startFlight({
       }
       lastDaylightAngle = spinAngle;
     } else {
-      bounce.visible = true;
       ambient.intensity = 1.3;
       sun.intensity = 3.22;
       bounce.intensity = 1.04;
@@ -973,11 +998,8 @@ export function startFlight({
     lastSunUpdate = -Infinity;
     daylight.shadow.needsUpdate = true;
     reflection?.dispose();
-    reflection = undefined;
-    if (destination === "station") {
-      reflection = stationReflections(renderer);
-      scene.environment = reflection.texture;
-    }
+    reflection = stationReflections(renderer);
+    scene.environment = reflection.texture;
     available = true;
     dirty = true;
     onGraphics(true);
@@ -991,11 +1013,96 @@ export function startFlight({
   orbit = { ...orbitTarget };
   camera.fov = viewFov(initialView);
   camera.updateProjectionMatrix();
-  frame(performance.now());
+
+  /**
+   * Draws one frame with every group showing and both shadow maps refreshed.
+   * Compiling a shader is not enough: the driver builds its pipeline state and
+   * uploads vertex buffers on first draw, so draw everything once up front.
+   */
+  function warmFrame() {
+    const position = camera.position.clone();
+    const rotation = camera.quaternion.clone();
+    const { near, far } = camera;
+    const stationShown = station.visuals.visible;
+    station.visuals.visible = true;
+    station.city.setShadowCasting(true);
+    sun.shadow.needsUpdate = daylight.shadow.needsUpdate = true;
+    // Trees swap in detailed models up close; draw every level now, or the
+    // detailed ones are first drawn (and their shadow shaders built) mid-landing.
+    const detailLevels: THREE.LOD[] = [];
+    station.visuals.traverse((object) => {
+      if (!(object instanceof THREE.LOD)) return;
+      detailLevels.push(object);
+      object.autoUpdate = false;
+      for (const level of object.levels) level.object.visible = true;
+    });
+    camera.position.set(0, 60, 220);
+    camera.lookAt(0, 0, 0);
+    camera.near = 1;
+    camera.far = 2000;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    atlas.warm(() => renderer.render(scene, camera));
+    for (const lod of detailLevels) lod.autoUpdate = true;
+    station.visuals.visible = stationShown;
+    station.city.setShadowCasting(cityShadows);
+    camera.position.copy(position);
+    camera.quaternion.copy(rotation);
+    camera.near = near;
+    camera.far = far;
+    camera.updateProjectionMatrix();
+    lastSunAngle = Infinity;
+    dirty = true;
+  }
+
+  const optics = "Preparing optics";
+  const entryStages: Stage[] = [
+    {
+      label: "Loading star catalogue",
+      weight: 2,
+      optional: true,
+      run: () => sky.load(),
+    },
+    ...atlas.textureStages(entryGroup === "system" ? "system" : "station"),
+    {
+      label: optics,
+      weight: 2,
+      run() {
+        reflection = stationReflections(renderer);
+        scene.environment = reflection.texture;
+      },
+    },
+    {
+      label: optics,
+      weight: 6,
+      // Compiles every material in the scene, shown or hidden, in parallel
+      // where the browser supports it.
+      run: async () => void (await renderer.compileAsync(scene, camera)),
+    },
+    { label: optics, weight: 3, run: warmFrame },
+  ];
+  await runStages(entryStages, (fraction, label) =>
+    onProgress?.(0.5 + fraction * 0.5, label),
+  );
+
+  // Groups the visitor did not enter through only lack their image maps;
+  // fetch and upload those one per slice while the first scene is on screen.
+  const warmed = new Map<WarmGroup, Promise<void>>();
+  let chain = Promise.resolve();
+  for (const group of warmOrder(initialDestination)) {
+    const stages = group === "system" ? atlas.textureStages("system") : [];
+    chain = chain.then(() => runStages(stages, () => {}, macrotask)).catch(() => {});
+    warmed.set(group, chain);
+  }
+
+  last = performance.now();
+  frame(last);
   renderer.setAnimationLoop(frame);
   onGraphics(true);
 
   return {
+    /** Resolves once a destination group can be shown without a hitch. */
+    whenWarm: (group: WarmGroup) => warmed.get(group) ?? Promise.resolve(),
     setDestination,
     setView,
     zoom,

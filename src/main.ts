@@ -92,7 +92,7 @@ let destination: Destination = resumeLocation?.destination ?? "station";
 let stationView: View = resumeLocation?.view ?? "orbital";
 let playing = !reducedMotion.matches;
 let timeIndex = 0;
-let flight: ReturnType<typeof startFlight> | undefined;
+let flight: Awaited<ReturnType<typeof startFlight>> | undefined;
 let launchStars: ReturnType<typeof createLaunchStarfield>;
 
 function labelButton(id: Destination) {
@@ -247,20 +247,23 @@ function graphicsChanged(ready: boolean) {
   } else if (dialog.open) dialog.close();
 }
 
-function startExplorer(resuming = false) {
+function startExplorer() {
   if (flight || enterSpace.disabled) return;
   enterSpace.disabled = true;
   get("graphics-message").hidden = true;
   get("enter-label").textContent = "Entering Space…";
   explorer.hidden = false;
-  if (resuming) launch.hidden = true;
   void import("./flight")
-    .then(({ startFlight }) => {
-      flight = startFlight({
+    .then(({ startFlight }) =>
+      startFlight({
         host: world,
         initialDestination: destination,
         initialView: stationView,
         onGraphics: graphicsChanged,
+        onProgress: (fraction, label) => {
+          get("enter-label").textContent =
+            `${label} ${Math.round(fraction * 100)}%`;
+        },
         allowControls: () => !dialog.open,
         onSelectBody: selectDestination,
         onRouteStop: (next) => {
@@ -268,7 +271,10 @@ function startExplorer(resuming = false) {
           showLocation();
           saveLocation();
         },
-      });
+      }),
+    )
+    .then((started) => {
+      flight = started;
       syncSpin();
     })
     .catch((error: unknown) => {
@@ -341,5 +347,5 @@ for (const button of document.querySelectorAll<HTMLButtonElement>(
 
 showLocation();
 syncSpin();
-if (resumeLocation) startExplorer(true);
-else syncLaunchMotion();
+syncLaunchMotion();
+if (resumeLocation) startExplorer();
