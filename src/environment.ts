@@ -44,10 +44,25 @@ export async function loadTexture(url: string) {
   return texture;
 }
 
+/** Share of stars in each colour class, coolest first, and its tint. */
+const starClasses: [share: number, tint: [number, number, number]][] = [
+  [0.5, [1.0, 0.74, 0.55]],
+  [0.22, [1.0, 0.84, 0.68]],
+  [0.14, [1.0, 0.95, 0.86]],
+  [0.1, [0.92, 0.95, 1.0]],
+  [0.04, [0.7, 0.8, 1.0]],
+];
+
+/**
+ * The fixed stars. They do not twinkle (that is Earth's air), their colours
+ * follow how common each temperature class is, and a small minority carry most
+ * of the light: those are brighter than white and pick up the bloom.
+ */
 export function makeStarField() {
   const random = seededRandom(618);
   const positions = [];
   const brightness = [];
+  const tints = [];
   for (let i = 0; i < 5800; i++) {
     const y = random() * 2 - 1;
     const azimuth = random() * Math.PI * 2;
@@ -57,7 +72,14 @@ export function makeStarField() {
       y * 320,
       Math.sin(azimuth) * plane * 320,
     );
-    brightness.push(0.22 + random() ** 5 * 0.76);
+    const rank = random();
+    brightness.push(
+      rank > 0.985 ? 1.1 + (rank - 0.985) * 150 : 0.14 + rank ** 6 * 0.82,
+    );
+    let pick = random();
+    const [, tint] =
+      starClasses.find(([share]) => (pick -= share) < 0) ?? starClasses[0];
+    tints.push(...tint);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
@@ -68,6 +90,7 @@ export function makeStarField() {
     "brightness",
     new THREE.Float32BufferAttribute(brightness, 1),
   );
+  geometry.setAttribute("tint", new THREE.Float32BufferAttribute(tints, 3));
   const material = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -75,20 +98,26 @@ export function makeStarField() {
     uniforms: { density: { value: 1 } },
     vertexShader: `
       attribute float brightness;
+      attribute vec3 tint;
       varying float energy;
+      varying vec3 colour;
       uniform float density;
       void main() {
         energy = brightness;
-        gl_PointSize = (1.15 + 1.7 * brightness) * density;
+        colour = tint;
+        gl_PointSize = (1.15 + 1.5 * min(brightness, 1.6)) * density;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: `
       varying float energy;
+      varying vec3 colour;
       void main() {
         float r = length(gl_PointCoord - 0.5) * 2.0;
         float point = exp(-r * r * 5.0) * (1.0 - smoothstep(0.7, 1.0, r));
-        gl_FragColor = vec4(mix(vec3(0.60, 0.71, 1.0), vec3(1.0, 0.88, 0.68), energy), energy * point);
+        gl_FragColor = vec4(colour * energy, point);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
       }
     `,
   });

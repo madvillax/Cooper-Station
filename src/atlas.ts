@@ -14,6 +14,8 @@ const sunDirection = new THREE.Vector3(-0.9, 0.38, 0.62).normalize();
 const sphere = new THREE.SphereGeometry(1, 96, 64);
 const systemSun = new THREE.Vector3(-8, 1.7, -13);
 const systemPlaneTilt = 0.26;
+/** Radius of the atmosphere shell, in planet radii. */
+const AIR_SHELL = 1.07;
 
 export function createAtlas(
   invalidate: () => void,
@@ -86,6 +88,12 @@ export function createAtlas(
           ? 0.36
           : 0.12;
     const light = sunDirection.clone();
+    const pole = new THREE.Vector3(0, 1, 0);
+    const giant =
+      id === "jupiter" || id === "saturn" || id === "uranus" || id === "neptune";
+    const airColor = new THREE.Color(
+      id === "earth" ? 0x538bff : id === "neptune" ? 0x89b7d0 : color,
+    );
     const material = new THREE.ShaderMaterial({
       defines: id === "sun" ? { SOLAR_SURFACE: 1 } : {},
       toneMapped: id !== "sun",
@@ -93,11 +101,17 @@ export function createAtlas(
         surface: { value: emptyTexture },
         clouds: { value: emptyTexture },
         nightMap: { value: emptyTexture },
+        ringMap: { value: emptyTexture },
         mapped: { value: 0 },
         clouded: { value: 0 },
         hasNight: { value: 0 },
+        ringShadow: { value: 0 },
+        ocean: { value: id === "earth" ? 1 : 0 },
+        limbDarkening: { value: giant ? 1 : 0 },
         cloudDrift: { value: 0 },
+        time: { value: 0 },
         sunlight: { value: light },
+        pole: { value: pole },
         tint: { value: new THREE.Color(color) },
         brightness: { value: 1 },
         atmosphere: { value: atmosphere },
@@ -107,11 +121,7 @@ export function createAtlas(
         colorCorrection: {
           value: id === "neptune" ? 0.66 : id === "uranus" ? 0.29 : 0.0,
         },
-        airColor: {
-          value: new THREE.Color(
-            id === "earth" ? 0x538bff : id === "neptune" ? 0x89b7d0 : color,
-          ),
-        },
+        airColor: { value: airColor },
       },
       vertexShader: `
         varying vec2 coordinates;
@@ -129,7 +139,9 @@ export function createAtlas(
         uniform sampler2D surface;
         uniform sampler2D clouds;
         uniform sampler2D nightMap;
+        uniform sampler2D ringMap;
         uniform vec3 sunlight;
+        uniform vec3 pole;
         uniform vec3 tint;
         uniform vec3 airColor;
         uniform vec3 reflectance;
@@ -138,33 +150,92 @@ export function createAtlas(
         uniform float mapped;
         uniform float clouded;
         uniform float hasNight;
+        uniform float ringShadow;
+        uniform float ocean;
+        uniform float limbDarkening;
         uniform float cloudDrift;
         uniform float brightness;
+        uniform float time;
         varying vec2 coordinates;
         varying vec3 normalWorld;
         varying vec3 positionWorld;
+
+        float hash(vec2 p) {
+          vec3 v = fract(vec3(p.xyx) * 0.1031);
+          v += dot(v, v.yzx + 33.33);
+          return fract((v.x + v.y) * v.z);
+        }
+
+        float noise(vec2 p) {
+          vec2 cell = floor(p);
+          vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(hash(cell), hash(cell + vec2(1.0, 0.0)), f.x),
+            mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), f.x),
+            f.y
+          );
+        }
+
         void main() {
           vec3 n = normalize(normalWorld);
           vec3 viewDir = normalize(cameraPosition - positionWorld);
           float facing = max(dot(n, viewDir), 0.0);
-          vec3 ground = mix(tint, texture2D(surface, coordinates).rgb, mapped);
           #ifdef SOLAR_SURFACE
+            // The photosphere boils: push the map around with slow flow noise.
+            vec2 cells = coordinates * vec2(46.0, 23.0);
+            vec2 flow = vec2(
+              noise(cells + vec2(time * 0.05, 3.1)),
+              noise(cells + vec2(8.4, -time * 0.04))) - 0.5;
+            vec3 ground = mix(tint, texture2D(surface, coordinates + flow * 0.008).rgb, mapped);
+            float granules = noise(cells * 4.0 + flow * 6.0 + time * 0.02);
             vec3 plasma = vec3(pow(ground.r, 0.86), ground.g * 0.77, ground.b * 0.55);
+            plasma *= 0.86 + granules * 0.22;
             plasma *= 0.90 + facing * 0.10;
             float rim = exp(-facing * facing * 78.0);
             plasma = mix(plasma, vec3(1.0, 0.60, 0.065), rim * 0.90);
             gl_FragColor = vec4(plasma * brightness, 1.0);
           #else
+            vec3 ground = mix(tint, texture2D(surface, coordinates).rgb, mapped);
             float edge = pow(1.0 - facing, 3.5);
             float incoming = dot(n, sunlight);
             float day = pow(max(incoming, 0.0), 0.81);
             float twilight = smoothstep(-0.13, 0.32, incoming);
             float luminance = dot(ground, vec3(0.2126, 0.7152, 0.0722));
+            // Open water is the only strongly blue-dominant thing on the map.
+            float water = ocean * mapped * smoothstep(0.03, 0.14, ground.b - max(ground.r, ground.g) * 0.9);
             ground = mix(ground, luminance * reflectance * 1.25, colorCorrection);
+
+            // East and north on the surface, to offset lookups toward the Sun.
+            vec3 east = normalize(cross(pole, n) + vec3(1e-5));
+            vec3 north = cross(n, east);
+            vec2 sunward = vec2(dot(sunlight, east), dot(sunlight, north));
             float cloud = texture2D(clouds, vec2(fract(coordinates.x + cloudDrift), coordinates.y)).r * clouded;
+            // Clouds float above the ground, so their shadow falls down-Sun.
+            vec2 shadowAt = coordinates + sunward * 0.0045;
+            float cloudShade = texture2D(clouds, vec2(fract(shadowAt.x + cloudDrift), shadowAt.y)).r * clouded;
+            ground *= 1.0 - 0.35 * smoothstep(0.12, 0.8, cloudShade) * (1.0 - smoothstep(0.04, 0.5, cloud));
             ground = mix(ground, vec3(0.87, 0.93, 1.0), smoothstep(0.04, 0.86, cloud) * 0.84);
+
+            // Saturn's rings throw a banded shadow across the globe.
+            float towardRings = dot(sunlight, pole);
+            float reach = -dot(n, pole) / (abs(towardRings) < 1e-4 ? 1e-4 : towardRings);
+            vec3 crossing = n + sunlight * reach;
+            float ringRadius = length(crossing);
+            float ringShade = ringShadow * step(0.0, reach)
+              * step(1.19, ringRadius) * step(ringRadius, 2.32)
+              * texture2D(ringMap, vec2((ringRadius - 1.19) / 1.13, 0.5)).a;
+            day *= 1.0 - 0.82 * ringShade;
+
+            vec3 halfway = normalize(sunlight + viewDir);
+            float glint = pow(max(dot(n, halfway), 0.0), 110.0)
+              * water * (1.0 - smoothstep(0.04, 0.5, cloud)) * step(0.0, incoming);
             vec3 lights = texture2D(nightMap, coordinates).rgb * hasNight * (1.0 - smoothstep(-0.26, 0.08, incoming)) * 0.82;
-            vec3 rendered = ground * (0.017 + day * 1.20) + lights + airColor * edge * atmosphere * (0.045 + twilight * 0.47);
+            vec3 rendered = ground * (0.017 + day * 1.20) + lights
+              + vec3(1.0, 0.94, 0.82) * glint * 2.4
+              + airColor * edge * atmosphere * (0.045 + twilight * 0.47);
+            // Thick atmospheres absorb more along the slanted path at the limb.
+            rendered *= mix(1.0, pow(max(facing, 0.02), 0.35), limbDarkening);
             gl_FragColor = vec4(rendered, 1.0);
           #endif
           #include <tonemapping_fragment>
@@ -172,6 +243,70 @@ export function createAtlas(
         }
       `,
     });
+    const airGlow =
+      id === "earth"
+        ? 1
+        : id === "venus"
+          ? 0.8
+          : id === "neptune" || id === "uranus"
+            ? 0.4
+            : id === "jupiter" || id === "saturn"
+              ? 0.3
+              : id === "mars"
+                ? 0.25
+                : 0;
+    if (airGlow) {
+      // The air above the limb, seen edge-on against space: a shell of back
+      // faces whose brightness depends on how close each sight line passes
+      // to the surface, and on whether that point is in daylight.
+      const air = new THREE.Mesh(
+        sphere,
+        new THREE.ShaderMaterial({
+          side: THREE.BackSide,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          uniforms: {
+            sunlight: material.uniforms.sunlight,
+            airColor: material.uniforms.airColor,
+            strength: { value: airGlow },
+          },
+          vertexShader: `
+            varying vec3 normalWorld;
+            varying vec3 positionWorld;
+            void main() {
+              normalWorld = normalize(mat3(modelMatrix) * normal);
+              vec4 position = modelMatrix * vec4(position, 1.0);
+              positionWorld = position.xyz;
+              gl_Position = projectionMatrix * viewMatrix * position;
+            }
+          `,
+          fragmentShader: `
+            uniform vec3 sunlight;
+            uniform vec3 airColor;
+            uniform float strength;
+            varying vec3 normalWorld;
+            varying vec3 positionWorld;
+            void main() {
+              vec3 n = normalize(normalWorld);
+              vec3 viewDir = normalize(cameraPosition - positionWorld);
+              float along = dot(n, viewDir);
+              // Closest the sight line comes to the planet's centre, in radii.
+              float nearest = ${AIR_SHELL.toFixed(2)} * sqrt(max(1.0 - along * along, 0.0));
+              float height = clamp((nearest - 1.0) / ${(AIR_SHELL - 1).toFixed(2)}, 0.0, 1.0);
+              float halo = pow(1.0 - height, 3.0);
+              vec3 tangentPoint = normalize(n - along * viewDir);
+              float lit = smoothstep(-0.04, 0.5, dot(tangentPoint, sunlight));
+              gl_FragColor = vec4(airColor * halo * lit * strength * 1.25, 1.0);
+              #include <tonemapping_fragment>
+              #include <colorspace_fragment>
+            }
+          `,
+        }),
+      );
+      air.scale.setScalar(AIR_SHELL);
+      frame.add(air);
+    }
     const surface = new THREE.Mesh(sphere, material);
     surface.rotation.y = id === "earth" ? 0.96 : id === "jupiter" ? 1.4 : 0;
     axis.add(surface);
@@ -249,9 +384,12 @@ export function createAtlas(
         }),
       );
       if (id === "saturn") {
+        // The globe reads the same ring profile to cast the rings' shadow.
+        material.uniforms.ringMap = ring.material.uniforms.ringMap;
         texture("saturn-rings", (image) => {
           ring.material.uniforms.ringMap.value = image;
           ring.material.uniforms.ringMapped.value = 1;
+          material.uniforms.ringShadow.value = 1;
         });
       } else {
         ring.visible = false;
@@ -260,7 +398,7 @@ export function createAtlas(
       ring.rotation.x = -Math.PI / 2;
       axis.add(ring);
     }
-    return { frame, surface, material, light };
+    return { frame, axis, surface, material, light, pole };
   }
 
   for (const planet of planets) {
@@ -367,6 +505,11 @@ export function createAtlas(
         const offset = id === "earth" ? 0.96 : id === "jupiter" ? 1.4 : 0;
         item.surface.rotation.y =
           offset + elapsed * (id === "jupiter" ? 0.086 : 0.042);
+        item.pole
+          .set(0, 1, 0)
+          .applyQuaternion(item.axis.quaternion)
+          .applyQuaternion(item.frame.quaternion);
+        item.material.uniforms.time.value = elapsed;
       }
     }
   }
