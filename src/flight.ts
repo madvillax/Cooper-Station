@@ -680,15 +680,16 @@ export async function startFlight({
   }
 
   function draw() {
-    const timed = timer && post.hdr && !gpuQuery;
-    if (timed) {
+    // One query at a time: start the next only once the last has been read.
+    const clock = post.hdr && !gpuQuery ? timer : null;
+    if (clock) {
       gpuQuery = gl.createQuery();
-      gl.beginQuery(timer.TIME_ELAPSED_EXT, gpuQuery!);
+      gl.beginQuery(clock.TIME_ELAPSED_EXT, gpuQuery!);
       gpuQueryOpen = true;
     }
     post.render(scene, camera, last / 1000);
-    if (timed) {
-      gl.endQuery(timer.TIME_ELAPSED_EXT);
+    if (clock) {
+      gl.endQuery(clock.TIME_ELAPSED_EXT);
       gpuQueryOpen = false;
     }
   }
