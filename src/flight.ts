@@ -297,7 +297,7 @@ export async function startFlight({
       (navigator.hardwareConcurrency ?? 8) <= 4
         ? "balanced"
         : "high",
-    upThreshold: timer ? 0.5 : 0.95,
+    upThreshold: 0.5,
   });
   let quality = tierSettings[governor.tier];
   let lastDaylightAngle = Infinity;
@@ -540,7 +540,10 @@ export async function startFlight({
    */
   function measureLoad(now: number) {
     let load: number | null = null;
-    if (timer) {
+    // A timer query only sees work the GPU finishes inside it. Drawing to the
+    // screen is deferred until the frame is presented, so on the direct (Low)
+    // path the query reads near zero; use frame gaps there instead.
+    if (timer && post.hdr) {
       if (gpuQuery && !gpuQueryOpen) {
         if (gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT_AVAILABLE)) {
           const disjoint = gl.getParameter(timer.GPU_DISJOINT_EXT);
@@ -554,7 +557,12 @@ export async function startFlight({
     } else if (lastDraw > 0) {
       const interval = now - lastDraw;
       displayInterval = clamp(Math.min(displayInterval + 0.002, interval), 6.9, 16.7);
-      load = interval / (displayInterval * 1.15);
+      // Frame gaps cannot drop below the display's rate, so "keeping up with
+      // the display" is reported as a light load rather than as nearly full.
+      load =
+        interval <= displayInterval * 1.08
+          ? 0.4
+          : interval / (displayInterval * 1.15);
     }
     lastDraw = now;
     if (load === null) return;
@@ -563,7 +571,7 @@ export async function startFlight({
   }
 
   function draw() {
-    const timed = timer && !gpuQuery;
+    const timed = timer && post.hdr && !gpuQuery;
     if (timed) {
       gpuQuery = gl.createQuery();
       gl.beginQuery(timer.TIME_ELAPSED_EXT, gpuQuery!);
