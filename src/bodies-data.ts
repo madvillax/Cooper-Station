@@ -138,7 +138,7 @@ export function facts(destination: Destination): Facts {
           { label: "Age", value: "4.6 billion years" },
           { label: "Sun to Neptune", value: `${orbital.neptune.au.toFixed(1)} AU` },
           {
-            label: "Light across",
+            label: "Light to Neptune",
             value: formatDuration(lightTimeSeconds(orbital.neptune.au)),
           },
           { label: "Scale", value: "Distances compressed" },

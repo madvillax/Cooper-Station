@@ -121,7 +121,14 @@
           >
             10 min/s
           </button>
-          <output class="date" id="sim-date" aria-label="Simulation date"></output>
+          <!-- An output is a live region by default; at fast rates the date
+               would be announced non-stop. -->
+          <output
+            class="date"
+            id="sim-date"
+            aria-label="Simulation date"
+            aria-live="off"
+          ></output>
         </div>
         <div class="tools">
           <button

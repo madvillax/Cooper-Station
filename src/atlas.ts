@@ -212,7 +212,7 @@ export function createAtlas(
             gl_FragColor = vec4(plasma * brightness, 1.0);
           #else
             vec3 ground = mix(tint, texture2D(surface, coordinates).rgb, mapped);
-            float edge = pow(1.0 - facing, 3.5);
+            float edge = pow(max(1.0 - facing, 0.0), 3.5);
             float incoming = dot(n, sunlight);
             float day = pow(max(incoming, 0.0), 0.81);
             float twilight = smoothstep(-0.13, 0.32, incoming);

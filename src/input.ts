@@ -63,9 +63,16 @@ export function attachInput(host: HTMLElement, handlers: InputHandlers) {
     (event) => {
       if (!handlers.allow() || !(event.target instanceof HTMLElement)) return;
       if (event.altKey || event.metaKey || event.ctrlKey) return;
-      // A focused button or slider keeps its own keys; movement still works.
-      const inControl = event.target.closest("button, input, dialog, a") !== null;
-      if (inControl && !movementKeys.includes(event.code)) return;
+      // A focused control keeps only the keys it uses itself, so shortcuts
+      // still work after clicking a HUD button: Space and Enter press a
+      // button, arrows and +/- move a slider. A dialog keeps everything.
+      const target = event.target;
+      if (target.closest("dialog")) return;
+      if (!movementKeys.includes(event.code)) {
+        const pressesIt = event.code === "Space" || event.code === "Enter";
+        if (target.closest("button, a") && pressesIt) return;
+        if (target.closest("input") && !/^Key[FHM]$/.test(event.code)) return;
+      }
 
       if (heldKeys.includes(event.code)) {
         if (handlers.key(event.code, true)) event.preventDefault();

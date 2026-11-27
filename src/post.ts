@@ -38,9 +38,9 @@ function pass(fragmentShader: string, uniforms: Record<string, THREE.IUniform>) 
  * small passes instead of the wide blurs a Gaussian bloom needs.
  */
 export function createPost(renderer: THREE.WebGLRenderer) {
-  const supported =
-    renderer.extensions.has("EXT_color_buffer_float") ||
-    renderer.extensions.has("EXT_color_buffer_half_float");
+  // The packed float format below is only renderable with the full float
+  // extension; the half-float one alone would give a black screen.
+  const supported = renderer.extensions.has("EXT_color_buffer_float");
   // Packed 11/11/10-bit floats: HDR range in four bytes a pixel instead of
   // eight. With four samples each, that halves what every frame has to resolve.
   const hdrFormat = {

@@ -22,11 +22,15 @@ export const tierSettings: Record<Tier, TierSettings> = {
 
 const order: Tier[] = ["low", "balanced", "high"];
 const WINDOW_MS = 2000;
-const MIN_SAMPLES = 30;
+// Below this a window is a stalled or throttled page, not a slow one. It has
+// to be low: a machine managing five frames a second is the one that most
+// needs stepping down, and it produces only ten samples a window.
+const MIN_SAMPLES = 6;
 const WINDOWS_TO_STEP_DOWN = 2;
 const WINDOWS_TO_STEP_UP = 5;
 const MIN_GAP_MS = 4000;
 const RETURN_BLOCK_MS = 60_000;
+const LONGEST_BLOCK_MS = 16 * 60_000;
 
 /**
  * Chooses a quality tier from measured load, where load is frame cost divided
@@ -47,6 +51,10 @@ export function createGovernor(options: { initial: Tier; upThreshold: number }) 
   let lightWindows = 0;
   let lastChange = -Infinity;
   const blockedUntil = new Map<Tier, number>();
+  // How many times each tier has proved too heavy. Every bounce doubles the
+  // wait before it is tried again, so a machine that cannot hold a tier stops
+  // retrying it every minute.
+  const bounces = new Map<Tier, number>();
 
   function discard() {
     windowStart = null;
@@ -93,7 +101,12 @@ export function createGovernor(options: { initial: Tier; upThreshold: number }) 
       if (nowMs - lastChange < MIN_GAP_MS) return null;
       const index = order.indexOf(tier);
       if (heavyWindows >= WINDOWS_TO_STEP_DOWN && index > 0) {
-        blockedUntil.set(tier, nowMs + RETURN_BLOCK_MS);
+        const count = (bounces.get(tier) ?? 0) + 1;
+        bounces.set(tier, count);
+        blockedUntil.set(
+          tier,
+          nowMs + Math.min(LONGEST_BLOCK_MS, RETURN_BLOCK_MS * 2 ** (count - 1)),
+        );
         return change(order[index - 1], nowMs);
       }
       const above = order[index + 1];

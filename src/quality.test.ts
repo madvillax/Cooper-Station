@@ -30,11 +30,33 @@ describe("quality governor", () => {
 
   it("ignores a window with too few samples", () => {
     const governor = createGovernor({ initial: "high", upThreshold: 0.5 });
-    // A throttled tab: ten very slow frames across each window.
-    for (let now = 0; now < 12000; now += 200) {
+    // A throttled tab: two frames a second.
+    for (let now = 0; now < 12000; now += 500) {
       expect(governor.sample(5, now)).toBeNull();
     }
     expect(governor.tier).toBe("high");
+  });
+
+  it("steps down a machine that manages only ten frames a second", () => {
+    const governor = createGovernor({ initial: "high", upThreshold: 0.5 });
+    const changes: Tier[] = [];
+    for (let now = 0; now < 4300; now += 100) {
+      const change = governor.sample(6, now);
+      if (change) changes.push(change);
+    }
+    expect(changes).toEqual(["balanced"]);
+  });
+
+  it("waits twice as long before retrying a tier it bounced off again", () => {
+    const governor = createGovernor({ initial: "high", upThreshold: 0.5 });
+    feed(governor, 1.4, 0, 4200); // high -> balanced, high blocked 60 s
+    feed(governor, 0.2, 4200, 80_000); // back to high once the block lifts
+    expect(governor.tier).toBe("high");
+    // Overload just long enough for one step down (two windows).
+    expect(feed(governor, 1.4, 80_000, 85_000)).toEqual(["balanced"]);
+    // Second bounce: blocked for 120 s, so not back at +70 s, back by +140 s.
+    expect(feed(governor, 0.2, 85_000, 160_000)).toEqual([]);
+    expect(feed(governor, 0.2, 160_000, 230_000)).toEqual(["high"]);
   });
 
   it("waits four seconds between changes", () => {

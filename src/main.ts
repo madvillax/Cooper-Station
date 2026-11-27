@@ -446,7 +446,10 @@ function startExplorer(cinematic: boolean) {
         } else if (action === "open-atlas") open(atlas);
         else open(helpSheet);
       },
-      allowControls: () => !sheets.some((sheet) => sheet.open),
+      // No shortcuts while a sheet is open, or before the view exists (they
+      // would change the HUD and not the scene).
+      allowControls: () => !explorer.inert && !sheets.some((sheet) => sheet.open),
+      initialQuality: settings.quality,
       onSelectBody: selectDestination,
       onRouteStop: (next) => {
         destination = next;
@@ -484,12 +487,12 @@ function startExplorer(cinematic: boolean) {
     });
 }
 
-enterSpace.addEventListener("click", () => startExplorer(true));
+enterSpace.addEventListener("click", () => {
+  // Sound begins here, with the visitor's own click, and not before.
+  audio.start();
+  startExplorer(true);
+});
 launchSound.addEventListener("change", () => setSound(launchSound.checked));
-// Browsers allow sound only after a click or key press; the first one starts it.
-for (const gesture of ["pointerdown", "keydown"] as const) {
-  document.addEventListener(gesture, () => audio.start(), { once: true });
-}
 window.addEventListener("hashchange", () => location.reload());
 
 get("reset-view").addEventListener("click", () => flight?.reset());
@@ -580,4 +583,11 @@ setSound(settings.sound);
 get("setting-guides", HTMLInputElement).checked = settings.guides;
 showLocation();
 syncLaunchMotion();
-if (resumeLocation) startExplorer(false);
+if (resumeLocation) {
+  startExplorer(false);
+  // A deep link has no Enter click, and browsers allow sound only after a
+  // click or key press, so the first one inside the view starts it.
+  for (const gesture of ["pointerdown", "keydown"] as const) {
+    document.addEventListener(gesture, () => audio.start(), { once: true });
+  }
+}

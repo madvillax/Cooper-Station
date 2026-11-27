@@ -143,6 +143,7 @@ export async function startFlight({
   initialView,
   onGraphics,
   onProgress,
+  initialQuality = "auto",
   onFrame,
   onAction,
   allowControls,
@@ -155,6 +156,8 @@ export async function startFlight({
   onGraphics: (available: boolean) => void;
   /** Warm-up progress from 0 to 1, with a short label for the current step. */
   onProgress?: (fraction: number, label: string) => void;
+  /** A saved quality choice, applied before warm-up so the right pipeline is built. */
+  initialQuality?: Tier | "auto";
   /** Called after every drawn frame with figures and label positions for the HUD. */
   onFrame?: (telemetry: Telemetry) => void;
   /** Keyboard shortcuts that belong to the HUD rather than the camera. */
@@ -310,6 +313,7 @@ export async function startFlight({
     ready: boolean;
   } | null = null;
   let fade = 0;
+  let pendingView: View | null = null;
   let guidesShown = true;
   const telemetry: Telemetry = {
     cameraRadiusInRs: 0,
@@ -367,6 +371,7 @@ export async function startFlight({
         : "high",
     upThreshold: 0.5,
   });
+  governor.pin(initialQuality);
   let quality = tierSettings[governor.tier];
   let lastDaylightAngle = Infinity;
 
@@ -424,6 +429,7 @@ export async function startFlight({
   function aimWarp(next: Destination) {
     const jump = warp;
     if (!jump) return;
+    pendingView = null;
     jump.next = next;
     jump.ready = false;
     // Hold the warp until the destination's maps are on the GPU.
@@ -462,6 +468,9 @@ export async function startFlight({
     orbit = { ...orbitTarget };
     if (!movingWithinSystem) establish();
     dirty = true;
+    const queued = pendingView;
+    pendingView = null;
+    if (queued && next === "station") setView(queued);
   }
 
   /** Starts wide and a little off to one side, then eases onto the subject. */
@@ -618,17 +627,9 @@ export async function startFlight({
 
   function applyTier(tier: Tier) {
     quality = tierSettings[tier];
-    const wantHdr = post.supported && quality.hdr;
-    if (!running || wantHdr === post.hdr) {
-      usePipeline();
-    } else {
-      // Shaders differ between the HDR buffer and the screen. Build the other
-      // set in the background, then switch, so changing tier does not freeze.
-      const chosen = quality;
-      void compileFor(wantHdr).then(() => {
-        if (quality === chosen) usePipeline();
-      });
-    }
+    // Shaders differ between the HDR buffer and the screen, but entry builds
+    // and draws both sets, so switching pipeline here costs nothing.
+    usePipeline();
     setRenderRatio(maximumRatio * quality.scale);
     const size = quality.shadowSize || 1024;
     if (sun.shadow.mapSize.x !== size) {
@@ -718,6 +719,12 @@ export async function startFlight({
   }
 
   function setView(next: View) {
+    if (warp && !warp.swapped && warp.next === "station") {
+      // Still warping to the station: apply the view on arrival, so the HUD
+      // (which has already switched) and the scene end up agreeing.
+      pendingView = next;
+      return;
+    }
     if (destination !== "station" || view === next) return;
     const route =
       next === "ground" && isHabitatView(view)
@@ -1066,6 +1073,9 @@ export async function startFlight({
       if (Math.hypot(coast.x, coast.y) < 0.02) coast.x = coast.y = 0;
     }
     const steering = stick.x !== 0 || stick.y !== 0;
+    // With reduced motion nothing else forces a redraw, but a running clock
+    // still has to move the planets and the date.
+    const ticking = playing && isSolarDestination(destination);
 
     const flying = travelProgress !== travelTarget;
     if (flying) {
@@ -1100,6 +1110,7 @@ export async function startFlight({
       !animateSpace &&
       !animateCity &&
       !flying &&
+      !ticking &&
       !warp &&
       !drifting &&
       !coasting &&
@@ -1347,7 +1358,8 @@ export async function startFlight({
    * Compiling a shader is not enough: the driver builds its pipeline state and
    * uploads vertex buffers on first draw, so draw everything once up front.
    */
-  function warmFrame() {
+  function warmFrame(hdr: boolean) {
+    post.setTier({ hdr, bloom: true });
     const position = camera.position.clone();
     const rotation = camera.quaternion.clone();
     const { near, far } = camera;
@@ -1379,6 +1391,7 @@ export async function startFlight({
     camera.near = near;
     camera.far = far;
     camera.updateProjectionMatrix();
+    post.setTier(quality);
     lastSunAngle = Infinity;
     dirty = true;
   }
@@ -1400,14 +1413,23 @@ export async function startFlight({
         scene.environment = reflection.texture;
       },
     },
-    {
-      label: optics,
-      weight: 6,
-      // Compiles every material in the scene, shown or hidden, in parallel
-      // where the browser supports it.
-      run: async () => void (await compileFor(post.hdr)),
-    },
-    { label: optics, weight: 3, run: warmFrame },
+    // Shaders are built twice, once for the HDR buffer and once for the
+    // screen, because quality can move between those pipelines later and a
+    // build at that moment would freeze the picture. The one in use goes last.
+    ...(post.supported ? [!post.hdr, post.hdr] : [false]).flatMap(
+      (hdr): Stage[] => [
+        {
+          label: optics,
+          weight: 4,
+          // Compiles every material in the scene, shown or hidden, in
+          // parallel where the browser supports it.
+          run: async () => void (await compileFor(hdr)),
+        },
+        // compile() does not see per-material clipping planes, and drivers
+        // finish their own work on first draw, so draw everything once too.
+        { label: optics, weight: 2, run: () => warmFrame(hdr) },
+      ],
+    ),
   ];
   await runStages(entryStages, (fraction, label) =>
     onProgress?.(0.5 + fraction * 0.5, label),
@@ -1415,19 +1437,21 @@ export async function startFlight({
 
   // Groups the visitor did not enter through only lack their image maps;
   // fetch and upload those one per slice while the first scene is on screen.
-  let chain = Promise.resolve();
+  // All the downloads start together; a group with nothing to fetch is warm
+  // already, so a jump to the Milky Way never waits on planet maps.
+  atlas.preload("system");
   for (const group of warmOrder(initialDestination)) {
     const stages = group === "system" ? atlas.textureStages("system") : [];
-    chain = chain
-      .then(() =>
-        runStages(stages, () => {}, async () => {
-          // An upload just ran on this thread; do not let it look like load.
-          governor.discard();
-          await macrotask();
-        }),
-      )
-      .catch(() => {});
-    warmed.set(group, chain);
+    warmed.set(
+      group,
+      stages.length
+        ? runStages(stages, () => {}, async () => {
+            // An upload just ran on this thread; do not let it look like load.
+            governor.discard();
+            await macrotask();
+          }).catch(() => {})
+        : Promise.resolve(),
+    );
   }
 
   // Handles for scripts/bench.js; stripped from production builds.

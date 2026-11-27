@@ -12,6 +12,19 @@ export type Stage = {
 export type WarmGroup = "station" | "system" | "galaxy" | "blackhole";
 
 const defaultOrder: WarmGroup[] = ["station", "system", "galaxy", "blackhole"];
+/** How long an optional stage (a download) may take before it is skipped. */
+const OPTIONAL_TIMEOUT_MS = 10_000;
+
+/** Rejects if `work` has not settled in time. The work itself carries on. */
+function withTimeout(work: void | Promise<void>, milliseconds: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("timed out")), milliseconds);
+  });
+  return Promise.race([Promise.resolve(work), expired]).finally(() =>
+    clearTimeout(timer),
+  );
+}
 
 /**
  * Yields to the browser with a macrotask. Animation frames are paused in a
@@ -40,7 +53,10 @@ export async function runStages(
     label = stage.label;
     onProgress(total ? done / total : 0, label);
     try {
-      await stage.run();
+      // A stalled download must not hold the whole sequence. If it arrives
+      // later it still applies itself; it just is not waited for.
+      if (stage.optional) await withTimeout(stage.run(), OPTIONAL_TIMEOUT_MS);
+      else await stage.run();
     } catch (error) {
       if (!stage.optional) throw error;
       console.warn(`Skipped warm-up stage "${stage.label}"`, error);

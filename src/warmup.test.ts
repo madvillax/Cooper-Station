@@ -68,6 +68,28 @@ describe("runStages", () => {
     expect(progress.at(-1)).toBe(1);
   });
 
+  it("gives up on an optional stage that never finishes", async () => {
+    vi.useFakeTimers();
+    const ran: string[] = [];
+    const finished = runStages(
+      [
+        {
+          label: "stalled download",
+          weight: 1,
+          optional: true,
+          run: () => new Promise<void>(() => {}),
+        },
+        { label: "build", weight: 1, run: () => void ran.push("build") },
+      ],
+      () => {},
+      async () => {},
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    await finished;
+    vi.useRealTimers();
+    expect(ran).toEqual(["build"]);
+  });
+
   it("rejects when a required stage fails", async () => {
     await expect(
       runStages(
