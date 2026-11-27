@@ -10,6 +10,8 @@ import {
 } from "./destinations";
 import { makeSkyDome, makeStarField } from "./environment";
 import { DEFAULT_SOLAR_RATE, timeRates } from "./bodies-data";
+import { attachInput, type Action } from "./input";
+import { stepSpring, type Spring } from "./spring";
 import { DEFAULT_RPM, daysSinceJ2000, radiansPerSecond } from "./physics";
 import { createPost } from "./post";
 import { createGovernor, tierSettings, type Tier } from "./quality";
@@ -68,7 +70,12 @@ const worldUp = new THREE.Vector3(0, 1, 0);
 const cameraMatrix = new THREE.Matrix4();
 const clamp = THREE.MathUtils.clamp;
 const damp = THREE.MathUtils.damp;
-const scrollPixelsPerStop = 250;
+const FLY_HEIGHT = 0.33;
+/** Seconds for a sprung value to close half its gap. */
+const TURN_HALF_LIFE = 0.07;
+const ZOOM_HALF_LIFE = 0.12;
+const ARRIVAL_HALF_LIFE = 0.5;
+const WARP_HALF_SECONDS = 0.6;
 const maximumStopsPerSecond = 0.82;
 const sunStop = solarRoute.indexOf("sun");
 
@@ -110,6 +117,7 @@ export async function startFlight({
   initialView,
   onGraphics,
   onProgress,
+  onAction,
   allowControls,
   onSelectBody,
   onRouteStop,
@@ -120,6 +128,8 @@ export async function startFlight({
   onGraphics: (available: boolean) => void;
   /** Warm-up progress from 0 to 1, with a short label for the current step. */
   onProgress?: (fraction: number, label: string) => void;
+  /** Keyboard shortcuts that belong to the HUD rather than the camera. */
+  onAction?: (action: Exclude<Action, "reset">) => void;
   allowControls: () => boolean;
   onSelectBody: (destination: Destination) => void;
   onRouteStop: (destination: SolarDestination) => void;
@@ -245,14 +255,35 @@ export async function startFlight({
   const localCamera = new THREE.Vector3();
   const cutNormal = new THREE.Vector3();
   const rootRotation = new THREE.Quaternion();
-  const pointers = new Map<number, { x: number; y: number; travel: number }>();
   const keys = new Set<string>();
   const motionPreference = matchMedia("(prefers-reduced-motion: reduce)");
   let destination: Destination = "system";
   let elapsed = 0;
   let travelProgress = 0;
   let travelTarget = 0;
-  let wheelDistance = 0;
+  let overscroll = 0;
+  let idleSeconds = 0;
+  // True from arrival until the view has settled or the visitor takes over;
+  // while it is, the camera eases in slowly from a wider, offset start.
+  let settling = false;
+  let flyHeight = FLY_HEIGHT;
+  const stick = { x: 0, y: 0 };
+  /** Drag momentum, in the same units `aim` takes, per second. */
+  const coast = { x: 0, y: 0 };
+  const orbitVelocity = { yaw: 0, pitch: 0, zoom: 0 };
+  const lookVelocity = { yaw: 0, pitch: 0 };
+  const fovSpring: Spring = { value: 42, velocity: 0 };
+  const scratch: Spring = { value: 0, velocity: 0 };
+  let warp: {
+    elapsed: number;
+    next: Destination;
+    swapped: boolean;
+    ready: boolean;
+  } | null = null;
+  let fade = 0;
+  const warmed = new Map<WarmGroup, Promise<void>>();
+  /** Resolves once a destination group can be shown without a hitch. */
+  const whenWarm = (group: WarmGroup) => warmed.get(group) ?? Promise.resolve();
   let orbit = initialOrbit();
   let orbitTarget = { ...orbit };
   let walk = { ...flyoverStart };
@@ -291,6 +322,8 @@ export async function startFlight({
   const gpuSamples: number[] = [];
   let gpuQuery: WebGLQuery | null = null;
   let gpuQueryOpen = false;
+  /** Latest GPU time as a share of the budget; 1 until first measured. */
+  let gpuLoad = 1;
   const governor = createGovernor({
     initial:
       matchMedia("(pointer: coarse)").matches ||
@@ -332,7 +365,11 @@ export async function startFlight({
   }
 
   function setDestination(next: Destination) {
-    const wasSolar = isSolarDestination(destination);
+    if (warp && !warp.swapped) {
+      // Still on the way out: change where the jump lands.
+      aimWarp(next);
+      return;
+    }
     const nextSolar = isSolarDestination(next);
     const nextStop = nextSolar ? solarRoute.indexOf(next) : 0;
     if (
@@ -340,9 +377,33 @@ export async function startFlight({
       (!nextSolar || (travelProgress === nextStop && travelTarget === nextStop))
     )
       return;
-    const movingWithinSystem = wasSolar && nextSolar;
+    // Inside the Solar System the camera flies there in one continuous move.
+    // Anywhere else is too far to fly, so the view jumps under a warp.
+    if (!running || (isSolarDestination(destination) && nextSolar)) arrive(next);
+    else {
+      warp = { elapsed: 0, next, swapped: false, ready: false };
+      aimWarp(next);
+    }
+  }
+
+  function aimWarp(next: Destination) {
+    const jump = warp;
+    if (!jump) return;
+    jump.next = next;
+    jump.ready = false;
+    // Hold the warp until the destination's maps are on the GPU.
+    void whenWarm(warmGroup(next)).then(() => {
+      if (warp === jump && jump.next === next) jump.ready = true;
+    });
+    dirty = true;
+  }
+
+  function arrive(next: Destination) {
+    const nextSolar = isSolarDestination(next);
+    const nextStop = nextSolar ? solarRoute.indexOf(next) : 0;
+    const movingWithinSystem = isSolarDestination(destination) && nextSolar;
     transition =
-      movingWithinSystem && !motionPreference.matches
+      movingWithinSystem && running && !motionPreference.matches
         ? {
             from: {
               position: camera.position.clone(),
@@ -357,17 +418,26 @@ export async function startFlight({
     view = "orbital";
     governor.discard();
     travelProgress = travelTarget = nextStop;
-    wheelDistance = 0;
+    overscroll = 0;
     keys.clear();
     setCutaway(false);
     station.visuals.visible = next === "station";
     if (!movingWithinSystem) atlas.setView(nextSolar ? "system" : next);
     orbitTarget = initialOrbit();
-    orbit = {
-      ...orbitTarget,
-      zoom: movingWithinSystem || motionPreference.matches ? 1 : 1.45,
-    };
+    orbit = { ...orbitTarget };
+    if (!movingWithinSystem) establish();
     dirty = true;
+  }
+
+  /** Starts wide and a little off to one side, then eases onto the subject. */
+  function establish() {
+    orbitVelocity.yaw = orbitVelocity.pitch = orbitVelocity.zoom = 0;
+    coast.x = coast.y = 0;
+    settling = running && !motionPreference.matches;
+    if (settling) {
+      orbit.zoom = orbitTarget.zoom * 1.45;
+      orbit.yaw = orbitTarget.yaw - 0.25;
+    }
   }
 
   function solarPose(stop: SolarDestination, target: Pose) {
@@ -433,7 +503,7 @@ export async function startFlight({
     }
     if (isHabitatView(view)) {
       desired.position.copy(
-        terrainPoint(walk.u, walk.v, view === "ground" ? groundEye : 0.33),
+        terrainPoint(walk.u, walk.v, view === "ground" ? groundEye : flyHeight),
       );
       const a = surfaceAngle(walk.u);
       up.set(-Math.cos(a), -Math.sin(a), 0);
@@ -533,39 +603,42 @@ export async function startFlight({
   }
 
   /**
-   * Feeds the governor one frame. With a timer query, load is GPU time against
-   * a budget that leaves headroom inside a 60 Hz frame. Without one, it is the
-   * gap between frames against the display's own rate, which is estimated as
-   * the shortest gap seen recently.
+   * Feeds the governor one frame.
+   *
+   * Only missed frames count as overload: when the gap between frames is well
+   * over the display's own interval, the machine is not keeping up. GPU time
+   * alone is not trusted for that, because a lightly loaded GPU slows its clock
+   * and the same frame can read anywhere from 3 to 8 ms. GPU time is used the
+   * other way round, as evidence of headroom before stepping quality up.
    */
   function measureLoad(now: number) {
-    let load: number | null = null;
-    // A timer query only sees work the GPU finishes inside it. Drawing to the
-    // screen is deferred until the frame is presented, so on the direct (Low)
-    // path the query reads near zero; use frame gaps there instead.
-    if (timer && post.hdr) {
-      if (gpuQuery && !gpuQueryOpen) {
-        if (gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT_AVAILABLE)) {
-          const disjoint = gl.getParameter(timer.GPU_DISJOINT_EXT);
-          const nanoseconds = gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT);
-          gl.deleteQuery(gpuQuery);
-          gpuQuery = null;
-          if (!disjoint) load = nanoseconds / 1e6 / GPU_BUDGET_MS;
-          if (import.meta.env.DEV && load !== null) gpuSamples.push(nanoseconds / 1e6);
+    if (timer && post.hdr && gpuQuery && !gpuQueryOpen) {
+      if (gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT_AVAILABLE)) {
+        const disjoint = gl.getParameter(timer.GPU_DISJOINT_EXT);
+        const milliseconds = gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT) / 1e6;
+        gl.deleteQuery(gpuQuery);
+        gpuQuery = null;
+        if (!disjoint) {
+          gpuLoad = milliseconds / GPU_BUDGET_MS;
+          if (import.meta.env.DEV) gpuSamples.push(milliseconds);
         }
       }
-    } else if (lastDraw > 0) {
-      const interval = now - lastDraw;
-      displayInterval = clamp(Math.min(displayInterval + 0.002, interval), 6.9, 16.7);
-      // Frame gaps cannot drop below the display's rate, so "keeping up with
-      // the display" is reported as a light load rather than as nearly full.
-      load =
-        interval <= displayInterval * 1.08
-          ? 0.4
-          : interval / (displayInterval * 1.15);
     }
+    const previous = lastDraw;
     lastDraw = now;
-    if (load === null) return;
+    if (previous <= 0) return;
+    const interval = now - previous;
+    // The display's interval is the shortest gap seen recently.
+    displayInterval = clamp(Math.min(displayInterval + 0.002, interval), 6.9, 16.7);
+    const behind = interval / displayInterval;
+    const load =
+      behind <= 1.08
+        ? // Keeping up. How light it is comes from the GPU timer where there is
+          // one (it reads near zero on the direct path, so not there).
+          Math.min(0.95, timer && post.hdr ? gpuLoad : 0.4)
+        : behind < 1.3
+          ? 0.99 // ordinary jitter: neither light nor overloaded
+          : behind / 1.15;
     const change = governor.sample(load, now);
     if (change) applyTier(change);
   }
@@ -634,6 +707,9 @@ export async function startFlight({
     view = next;
     keys.clear();
     governor.discard();
+    flyHeight = FLY_HEIGHT;
+    coast.x = coast.y = 0;
+    settling = false;
     if (isHabitatView(next)) {
       walk = { ...(next === "ground" ? groundStart : flyoverStart) };
       look = { yaw: walk.yaw, pitch: walk.pitch };
@@ -649,6 +725,7 @@ export async function startFlight({
     if (isHabitatView(view)) {
       walk = { ...(view === "ground" ? groundStart : flyoverStart) };
       look = { yaw: walk.yaw, pitch: walk.pitch };
+      flyHeight = FLY_HEIGHT;
       transition = null;
     } else {
       orbitTarget = initialOrbit();
@@ -674,8 +751,10 @@ export async function startFlight({
     dirty = true;
   }
 
-  function zoom(factor: number) {
+  function zoom(factor: number, wheel = 0) {
     if (isHabitatView(view)) return;
+    const farthest = 2.6;
+    const wasFarthest = orbitTarget.zoom >= farthest - 1e-3;
     orbitTarget.zoom = clamp(
       orbitTarget.zoom * factor,
       destination === "system"
@@ -685,8 +764,23 @@ export async function startFlight({
           : destination === "blackhole"
             ? 0.08 // down to 2 Schwarzschild radii
             : 0.39,
-      2.6,
+      farthest,
     );
+    settling = false;
+    // Scrolling out past the limit at a planet pulls back to the whole system.
+    const atPlanet =
+      isSolarDestination(destination) &&
+      destination !== "system" &&
+      travelProgress === travelTarget;
+    if (wheel > 0 && wasFarthest && atPlanet && !transition) {
+      overscroll += wheel;
+      if (overscroll > 300) {
+        overscroll = 0;
+        onSelectBody("system");
+      }
+    } else {
+      overscroll = 0;
+    }
     dirty = true;
   }
 
@@ -722,9 +816,26 @@ export async function startFlight({
       (key("ArrowLeft") - key("ArrowRight")) * delta * 1.4,
       (key("ArrowUp") - key("ArrowDown")) * delta * 1.4,
     );
-    if (isHabitatView(view)) {
-      moveAcross(key("KeyW") - key("KeyS"), key("KeyD") - key("KeyA"), delta);
+    if (!isHabitatView(view)) return;
+    const haste = keys.has("ShiftLeft") || keys.has("ShiftRight") ? 2 : 1;
+    moveAcross(
+      key("KeyW") - key("KeyS") + stick.y,
+      key("KeyD") - key("KeyA") + stick.x,
+      delta * haste,
+    );
+    if (view === "habitat") {
+      flyHeight = clamp(
+        flyHeight + (key("KeyE") - key("KeyQ")) * delta * 0.3 * haste,
+        0.12,
+        1.2,
+      );
     }
+  }
+
+  /** Any deliberate input: ends the idle drift and the arrival sweep. */
+  function touched() {
+    idleSeconds = 0;
+    settling = false;
   }
 
   function flyThroughDock(progress: number, orbital: Pose, habitat: Pose) {
@@ -801,10 +912,22 @@ export async function startFlight({
     if (t === 1) transition = null;
   }
 
-  function interpolate(value: number, target: number, delta: number) {
-    if (Math.abs(value - target) < 0.0001 || motionPreference.matches)
-      return target;
-    return damp(value, target, 13, delta);
+  /** Eases one value toward its target on a critically damped spring. */
+  function ease<K extends string>(
+    values: Record<K, number>,
+    velocities: Record<K, number>,
+    key: K,
+    target: number,
+    halfLife: number,
+    delta: number,
+  ) {
+    scratch.value = values[key];
+    scratch.velocity = velocities[key];
+    stepSpring(scratch, target, motionPreference.matches ? 0 : halfLife, delta);
+    const arrived =
+      Math.abs(scratch.value - target) < 1e-4 && Math.abs(scratch.velocity) < 1e-3;
+    values[key] = arrived ? target : scratch.value;
+    velocities[key] = arrived ? 0 : scratch.velocity;
   }
 
   function frame(now: number) {
@@ -830,6 +953,49 @@ export async function startFlight({
       spinHours += (delta * Math.min(solarRate, 3600)) / 3600;
     }
     atlas.setDate(simDays, spinHours);
+    // A jump between regions: streak out, swap the scene, streak back in.
+    let warpAmount = 0;
+    if (warp) {
+      const half = motionPreference.matches ? 0.2 : WARP_HALF_SECONDS;
+      if (warp.swapped) {
+        warp.elapsed += delta;
+      } else {
+        warp.elapsed = Math.min(warp.elapsed + delta, half);
+        if (warp.elapsed >= half && warp.ready) {
+          warp.swapped = true;
+          arrive(warp.next);
+        }
+      }
+      const outward = THREE.MathUtils.smoothstep(warp.elapsed, 0, half);
+      warpAmount = warp.swapped
+        ? 1 - THREE.MathUtils.smoothstep(warp.elapsed, half, half * 2)
+        : outward;
+      if (warp.swapped && warp.elapsed >= half * 2) warp = null;
+    }
+    // The streak lives in the HDR output pass. Without it (Low tier, or
+    // reduced motion) the jump is a plain fade through black.
+    const streak = post.hdr && !motionPreference.matches;
+    post.setWarp(streak ? warpAmount : 0);
+    const nextFade = streak ? 0 : warpAmount;
+    if (nextFade !== fade) {
+      fade = nextFade;
+      renderer.domElement.style.opacity = String(1 - fade);
+    }
+
+    idleSeconds += delta;
+    const drifting =
+      idleSeconds > 20 && !isHabitatView(view) && !motionPreference.matches;
+    if (drifting) orbitTarget.yaw += 0.01 * delta;
+    const coasting = coast.x !== 0 || coast.y !== 0;
+    if (coasting) {
+      aim(coast.x * delta, coast.y * delta);
+      const decay = 0.5 ** (delta / 0.35);
+      coast.x *= decay;
+      coast.y *= decay;
+      if (Math.hypot(coast.x, coast.y) < 0.02) coast.x = coast.y = 0;
+    }
+    const steering = stick.x !== 0 || stick.y !== 0;
+
     const flying = travelProgress !== travelTarget;
     if (flying) {
       const limit = maximumStopsPerSecond * delta;
@@ -862,19 +1028,36 @@ export async function startFlight({
       !keys.size &&
       !animateSpace &&
       !animateCity &&
-      !flying
+      !flying &&
+      !warp &&
+      !drifting &&
+      !coasting &&
+      !steering
     ) {
       // Nothing to draw: gaps between frames no longer say anything about load.
       lastDraw = 0;
       governor.discard();
       return;
     }
-    if (keys.size && !transition && allowControls()) stepControls(delta);
-    orbit.yaw = interpolate(orbit.yaw, orbitTarget.yaw, delta);
-    orbit.pitch = interpolate(orbit.pitch, orbitTarget.pitch, delta);
-    orbit.zoom = interpolate(orbit.zoom, orbitTarget.zoom, delta);
-    walk.yaw = interpolate(walk.yaw, look.yaw, delta);
-    walk.pitch = interpolate(walk.pitch, look.pitch, delta);
+    if ((keys.size || steering) && !transition && allowControls()) {
+      stepControls(delta);
+    }
+    const turn = settling ? ARRIVAL_HALF_LIFE : TURN_HALF_LIFE;
+    ease(orbit, orbitVelocity, "yaw", orbitTarget.yaw, turn, delta);
+    ease(orbit, orbitVelocity, "pitch", orbitTarget.pitch, turn, delta);
+    ease(
+      orbit,
+      orbitVelocity,
+      "zoom",
+      orbitTarget.zoom,
+      settling ? ARRIVAL_HALF_LIFE : ZOOM_HALF_LIFE,
+      delta,
+    );
+    if (settling && orbit.zoom === orbitTarget.zoom && orbit.yaw === orbitTarget.yaw) {
+      settling = false;
+    }
+    ease(walk, lookVelocity, "yaw", look.yaw, TURN_HALF_LIFE, delta);
+    ease(walk, lookVelocity, "pitch", look.pitch, TURN_HALF_LIFE, delta);
     if (spinning) {
       station.spin.rotation.z =
         (station.spin.rotation.z + radiansPerSecond(rpm) * delta * timeScale) %
@@ -891,11 +1074,23 @@ export async function startFlight({
         (1 - THREE.MathUtils.smoothstep(Math.hypot(localCamera.x, localCamera.y), RADIUS - 0.04, RADIUS + 0.24));
     }
     const inside = habitatLight > 0.53;
-    const fov = interpolate(
-      camera.fov,
-      viewFov(view, inside),
+    // The view widens a little at speed: mid-flight between planets, and
+    // more during a warp.
+    const swell = flying
+      ? 6 * Math.sin(Math.PI * (travelProgress - Math.floor(travelProgress)))
+      : 0;
+    fovSpring.value = camera.fov;
+    stepSpring(
+      fovSpring,
+      viewFov(view, inside) + (motionPreference.matches ? 0 : swell + warpAmount * 9),
+      motionPreference.matches ? 0 : 0.2,
       delta,
     );
+    const fov =
+      Math.abs(fovSpring.velocity) < 1e-3 &&
+      Math.abs(fovSpring.value - viewFov(view, inside)) < 1e-3
+        ? viewFov(view, inside)
+        : fovSpring.value;
     const near = view === "ground" ? 0.00048 : 0.012;
     const far = view === "ground" ? 80 : 450;
     if (camera.fov !== fov || camera.near !== near) {
@@ -990,48 +1185,49 @@ export async function startFlight({
     if (travelTarget === next) return;
     travelTarget = next;
     orbitTarget = initialOrbit();
+    dirty = true;
   }
 
-  const orbitKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
-  const walkKeys = ["KeyW", "KeyA", "KeyS", "KeyD"];
-  window.addEventListener("keydown", (event) => {
-    if (!allowControls() || !(event.target instanceof HTMLElement)) return;
-    if (
-      event.target.closest("button, input, dialog") &&
-      !walkKeys.includes(event.code)
-    )
-      return;
-    if (
-      isSolarDestination(destination) &&
-      (event.code === "PageDown" || event.code === "PageUp")
-    ) {
-      event.preventDefault();
-      advanceSolarRoute(event.code === "PageDown" ? 1 : -1);
-      wheelDistance = 0;
-      return;
-    }
-    if (
-      !isHabitatView(view) &&
-      (event.key === "+" || event.key === "=" || event.key === "-")
-    ) {
-      if (event.altKey || event.metaKey || event.ctrlKey) return;
-      event.preventDefault();
-      zoom(event.key === "-" ? 1.25 : 0.8);
-      return;
-    }
-    if (
-      orbitKeys.includes(event.code) ||
-      (isHabitatView(view) && walkKeys.includes(event.code))
-    ) {
-      if (event.altKey || event.metaKey || event.ctrlKey) return;
-      event.preventDefault();
-      move(event.code, true);
-    }
-  });
-  window.addEventListener("keyup", (event) => keys.delete(event.code));
-  window.addEventListener("blur", () => {
-    keys.clear();
-    pointers.clear();
+  attachInput(host, {
+    allow: allowControls,
+    aim(dx, dy) {
+      touched();
+      aim(dx, dy);
+    },
+    release(vx, vy) {
+      if (motionPreference.matches) return;
+      coast.x = vx;
+      coast.y = vy;
+      dirty = true;
+    },
+    zoom(factor, wheel) {
+      touched();
+      zoom(factor, wheel);
+    },
+    tap(x, y) {
+      touched();
+      const target = atlas.pickBody(camera, x, y);
+      if (target) onSelectBody(target);
+    },
+    hop(direction) {
+      touched();
+      if (isSolarDestination(destination)) advanceSolarRoute(direction);
+    },
+    key(code, held) {
+      if (!held) {
+        keys.delete(code);
+        return false;
+      }
+      if (!code.startsWith("Arrow") && !isHabitatView(view)) return false;
+      touched();
+      move(code, true);
+      return true;
+    },
+    action(name) {
+      touched();
+      if (name === "reset") reset();
+      else onAction?.(name);
+    },
   });
   document.addEventListener("visibilitychange", () => {
     keys.clear();
@@ -1040,98 +1236,6 @@ export async function startFlight({
     governor.discard();
     dirty = true;
   });
-  host.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    host.focus({ preventScroll: true });
-    host.setPointerCapture(event.pointerId);
-    pointers.set(event.pointerId, {
-      x: event.clientX,
-      y: event.clientY,
-      travel: 0,
-    });
-    if (pointers.size > 1) {
-      for (const pointer of pointers.values()) pointer.travel = Infinity;
-    }
-  });
-  host.addEventListener("pointermove", (event) => {
-    const previous = pointers.get(event.pointerId);
-    if (!previous) return;
-    const next = {
-      x: event.clientX,
-      y: event.clientY,
-      travel:
-        previous.travel +
-        Math.hypot(event.clientX - previous.x, event.clientY - previous.y),
-    };
-    if (pointers.size === 1) {
-      aim((next.x - previous.x) * 0.005, (next.y - previous.y) * 0.005);
-    } else {
-      const other = [...pointers.entries()].find(
-        ([id]) => id !== event.pointerId,
-      )?.[1];
-      if (other) {
-        const oldDistance = Math.hypot(
-          previous.x - other.x,
-          previous.y - other.y,
-        );
-        const newDistance = Math.hypot(next.x - other.x, next.y - other.y);
-        zoom(Math.max(10, oldDistance) / Math.max(10, newDistance));
-      }
-    }
-    pointers.set(event.pointerId, next);
-  });
-  host.addEventListener("pointerup", (event) => {
-    const pointer = pointers.get(event.pointerId);
-    pointers.delete(event.pointerId);
-    if (destination !== "system" || !pointer || pointer.travel > 6) return;
-    const bounds = host.getBoundingClientRect();
-    const target = atlas.pickBody(
-      camera,
-      ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
-      1 - ((event.clientY - bounds.top) / bounds.height) * 2,
-    );
-    if (target) onSelectBody(target);
-  });
-  for (const name of ["pointercancel", "lostpointercapture"] as const) {
-    host.addEventListener(name, (event) => pointers.delete(event.pointerId));
-  }
-  host.addEventListener(
-    "wheel",
-    (event) => {
-      if (isHabitatView(view)) return;
-      event.preventDefault();
-      const delta =
-        event.deltaY *
-        (event.deltaMode === 1
-          ? 36
-          : event.deltaMode === 2
-            ? viewportHeight
-            : 1);
-      if (
-        isSolarDestination(destination) &&
-        !event.ctrlKey &&
-        !event.shiftKey &&
-        Math.abs(delta) >= Math.abs(event.deltaX)
-      ) {
-        if (transition || Math.abs(travelProgress - travelTarget) > 0.02)
-          return;
-        if (wheelDistance * delta < 0) wheelDistance = 0;
-        wheelDistance += clamp(
-          delta,
-          -scrollPixelsPerStop,
-          scrollPixelsPerStop,
-        );
-        const stops = Math.trunc(wheelDistance / scrollPixelsPerStop);
-        if (stops !== 0) {
-          advanceSolarRoute(stops);
-          wheelDistance %= scrollPixelsPerStop;
-        }
-      } else {
-        zoom(Math.exp(clamp(delta, -140, 140) * 0.0015));
-      }
-    },
-    { passive: false },
-  );
   renderer.domElement.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
     available = false;
@@ -1233,7 +1337,6 @@ export async function startFlight({
 
   // Groups the visitor did not enter through only lack their image maps;
   // fetch and upload those one per slice while the first scene is on screen.
-  const warmed = new Map<WarmGroup, Promise<void>>();
   let chain = Promise.resolve();
   for (const group of warmOrder(initialDestination)) {
     const stages = group === "system" ? atlas.textureStages("system") : [];
@@ -1254,15 +1357,26 @@ export async function startFlight({
     Object.assign(window, { __post: post, __renderer: renderer, __gpuSamples: gpuSamples });
   }
   running = true;
+  if (!isHabitatView(view)) establish();
   last = performance.now();
   frame(last);
   renderer.setAnimationLoop(frame);
   onGraphics(true);
 
   return {
-    /** Resolves once a destination group can be shown without a hitch. */
-    whenWarm: (group: WarmGroup) => warmed.get(group) ?? Promise.resolve(),
+    whenWarm,
     /** Pins a quality tier, or returns control to the governor with "auto". */
+    /** Analog movement from the on-screen stick, each axis from -1 to 1. */
+    setMoveVector(x: number, y: number) {
+      stick.x = x;
+      stick.y = y;
+      if (x || y) touched();
+      dirty = true;
+    },
+    hop(direction: 1 | -1) {
+      touched();
+      if (isSolarDestination(destination)) advanceSolarRoute(direction);
+    },
     setQuality(next: Tier | "auto") {
       const change = governor.pin(next);
       if (change) applyTier(change);
