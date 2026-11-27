@@ -275,6 +275,7 @@ function startExplorer() {
     )
     .then((started) => {
       flight = started;
+      if (import.meta.env.DEV) Object.assign(window, { __flight: started });
       syncSpin();
     })
     .catch((error: unknown) => {

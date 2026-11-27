@@ -9,6 +9,7 @@ import {
 } from "./destinations";
 import { makeSkyDome, makeStarField } from "./environment";
 import { DEFAULT_RPM, radiansPerSecond } from "./physics";
+import { createPost } from "./post";
 import { createGovernor, tierSettings, type Tier } from "./quality";
 import { createStation } from "./station";
 import {
@@ -132,6 +133,7 @@ export async function startFlight({
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.domElement.setAttribute("aria-hidden", "true");
+  const post = createPost(renderer);
 
   // Everything that feeds a shader's cache key is fixed for the whole session:
   // the fog object, each material's clipping-plane count, the lights in the
@@ -170,6 +172,16 @@ export async function startFlight({
     }
   });
   station.visuals.visible = false;
+  const emissives = new Map<THREE.MeshBasicMaterial, THREE.Color>();
+  station.visuals.traverse((object) => {
+    if (
+      object instanceof THREE.Mesh &&
+      object.material instanceof THREE.MeshBasicMaterial &&
+      !object.material.toneMapped
+    ) {
+      emissives.set(object.material, object.material.color.clone());
+    }
+  });
   const ambient = new THREE.HemisphereLight(0xd4e8ff, 0x384451, 1.3);
   scene.add(
     sky.mesh,
@@ -250,6 +262,7 @@ export async function startFlight({
   let timeScale = 1;
   let playing = !motionPreference.matches;
   let dirty = true;
+  let running = false;
   let available = true;
   let isCutaway = false;
   let last = performance.now();
@@ -268,6 +281,8 @@ export async function startFlight({
     GPU_DISJOINT_EXT: number;
   } | null;
   const GPU_BUDGET_MS = 11;
+  /** Dev only: raw GPU milliseconds per timed frame, read by scripts/bench.js. */
+  const gpuSamples: number[] = [];
   let gpuQuery: WebGLQuery | null = null;
   let gpuQueryOpen = false;
   const governor = createGovernor({
@@ -457,11 +472,42 @@ export async function startFlight({
 
   function setRenderRatio(ratio: number) {
     renderer.setDrawingBufferSize(viewportWidth, viewportHeight, ratio);
+    post.setSize(viewportWidth, viewportHeight, ratio);
     stars.setDensity(ratio);
+  }
+
+  /** Compiles every material for the HDR buffer or for the screen. */
+  function compileFor(hdr: boolean) {
+    renderer.setRenderTarget(hdr ? post.sceneTarget : null);
+    const compiled = renderer.compileAsync(scene, camera);
+    renderer.setRenderTarget(null);
+    return compiled;
+  }
+
+  function usePipeline() {
+    post.setTier(quality);
+    // Lamps and windows are authored at screen white; in the HDR buffer they
+    // are pushed past 1.0 so the bloom picks them up.
+    for (const [material, base] of emissives) {
+      material.color.copy(base).multiplyScalar(post.hdr ? 2.2 : 1);
+    }
+    atlas.setHdr(post.hdr);
+    dirty = true;
   }
 
   function applyTier(tier: Tier) {
     quality = tierSettings[tier];
+    const wantHdr = post.supported && quality.hdr;
+    if (!running || wantHdr === post.hdr) {
+      usePipeline();
+    } else {
+      // Shaders differ between the HDR buffer and the screen. Build the other
+      // set in the background, then switch, so changing tier does not freeze.
+      const chosen = quality;
+      void compileFor(wantHdr).then(() => {
+        if (quality === chosen) usePipeline();
+      });
+    }
     setRenderRatio(maximumRatio * quality.scale);
     const size = quality.shadowSize || 1024;
     if (sun.shadow.mapSize.x !== size) {
@@ -490,6 +536,7 @@ export async function startFlight({
           gl.deleteQuery(gpuQuery);
           gpuQuery = null;
           if (!disjoint) load = nanoseconds / 1e6 / GPU_BUDGET_MS;
+          if (import.meta.env.DEV && load !== null) gpuSamples.push(nanoseconds / 1e6);
         }
       }
     } else if (lastDraw > 0) {
@@ -510,7 +557,7 @@ export async function startFlight({
       gl.beginQuery(timer.TIME_ELAPSED_EXT, gpuQuery!);
       gpuQueryOpen = true;
     }
-    renderer.render(scene, camera);
+    post.render(scene, camera, last / 1000);
     if (timed) {
       gl.endQuery(timer.TIME_ELAPSED_EXT);
       gpuQueryOpen = false;
@@ -1106,7 +1153,7 @@ export async function startFlight({
     camera.far = 2000;
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
-    atlas.warm(() => renderer.render(scene, camera));
+    atlas.warm(() => post.render(scene, camera, 0));
     for (const lod of detailLevels) lod.autoUpdate = true;
     station.visuals.visible = stationShown;
     station.city.setShadowCasting(cityShadows);
@@ -1141,7 +1188,7 @@ export async function startFlight({
       weight: 6,
       // Compiles every material in the scene, shown or hidden, in parallel
       // where the browser supports it.
-      run: async () => void (await renderer.compileAsync(scene, camera)),
+      run: async () => void (await compileFor(post.hdr)),
     },
     { label: optics, weight: 3, run: warmFrame },
   ];
@@ -1167,6 +1214,11 @@ export async function startFlight({
     warmed.set(group, chain);
   }
 
+  // Handles for scripts/bench.js; stripped from production builds.
+  if (import.meta.env.DEV) {
+    Object.assign(window, { __post: post, __renderer: renderer, __gpuSamples: gpuSamples });
+  }
+  running = true;
   last = performance.now();
   frame(last);
   renderer.setAnimationLoop(frame);

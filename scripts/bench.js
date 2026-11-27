@@ -5,6 +5,7 @@
 // clock, so results do not depend on the browser's own frame timing (hidden or
 // background tabs throttle real frames). A frame's cost is the JS time of its
 // callbacks plus a one-pixel readPixels, which forces the GPU to finish.
+// Dev builds also report the app's own GPU timer queries as gpuMs.
 (() => {
   if (window.__bench) return;
   const queue = new Map();
@@ -105,9 +106,16 @@
     pump(20);
     const settle = recording;
     recording = [];
+    // The app's own GPU timer queries (dev builds) are the steadier signal;
+    // results arrive a few frames late, hence the short tail.
+    const gpu = window.__gpuSamples;
+    if (gpu) gpu.length = 0;
     pump(frames);
     const steady = recording;
     recording = null;
+    await sleep(20);
+    pump(4);
+    const gpuSorted = gpu ? [...gpu].sort((a, b) => a - b) : [];
     const cost = steady.map((frame) => frame.ms).sort((a, b) => a - b);
     const last = steady[steady.length - 1] ?? settle[settle.length - 1];
     return {
@@ -115,6 +123,8 @@
       worstMs: round(Math.max(0, ...settle.map((frame) => frame.ms), ...cost)),
       medianMs: round(quantile(cost, 0.5) ?? 0),
       p95Ms: round(quantile(cost, 0.95) ?? 0),
+      gpuMs: gpuSorted.length ? round(quantile(gpuSorted, 0.5)) : null,
+      gpuP95Ms: gpuSorted.length ? round(quantile(gpuSorted, 0.95)) : null,
       draws: last?.draws ?? 0,
       tris: last?.tris ?? 0,
       width: last?.width ?? 0,
@@ -141,6 +151,9 @@
       await sleep(50);
       if (canvas() && !explorer.hidden && (launch.hidden || launch.inert)) break;
     }
+    // CSS and Web Animations do not advance in a hidden pane; finish them so
+    // screenshots show the scene rather than a half-faded launch page.
+    for (const animation of document.getAnimations()) animation.finish();
     const frames = recording;
     recording = null;
     return {

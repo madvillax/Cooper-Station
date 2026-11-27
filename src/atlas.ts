@@ -97,6 +97,7 @@ export function createAtlas(
         cloudDrift: { value: 0 },
         sunlight: { value: light },
         tint: { value: new THREE.Color(color) },
+        brightness: { value: 1 },
         atmosphere: { value: atmosphere },
         reflectance: {
           value: new THREE.Color(id === "neptune" ? 0xcee8f0 : 0xf0f5f6),
@@ -136,6 +137,7 @@ export function createAtlas(
         uniform float clouded;
         uniform float hasNight;
         uniform float cloudDrift;
+        uniform float brightness;
         varying vec2 coordinates;
         varying vec3 normalWorld;
         varying vec3 positionWorld;
@@ -149,7 +151,7 @@ export function createAtlas(
             plasma *= 0.90 + facing * 0.10;
             float rim = exp(-facing * facing * 78.0);
             plasma = mix(plasma, vec3(1.0, 0.60, 0.065), rim * 0.90);
-            gl_FragColor = vec4(plasma, 1.0);
+            gl_FragColor = vec4(plasma * brightness, 1.0);
           #else
             float edge = pow(1.0 - facing, 3.5);
             float incoming = dot(n, sunlight);
@@ -396,6 +398,12 @@ export function createAtlas(
     return hit && pickTargets.get(hit.object);
   }
 
+  /** In the HDR buffer the Sun is far brighter than white, so it blooms. */
+  function setHdr(hdr: boolean) {
+    const sun = bodies.get("sun");
+    if (sun) sun.material.uniforms.brightness.value = hdr ? 3.5 : 1;
+  }
+
   /** Draws with every group showing, so each one's GPU state exists up front. */
   function warm(draw: () => void) {
     const shown = current;
@@ -421,5 +429,6 @@ export function createAtlas(
     textureStages,
     preload,
     warm,
+    setHdr,
   };
 }

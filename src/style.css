@@ -335,17 +335,12 @@ a {
   height: 100%;
   display: block;
 }
+/* Legibility bands behind HUD text only; the lens vignette is in the renderer. */
 .vignette {
   pointer-events: none;
   background:
-    linear-gradient(180deg, #04060bbd, transparent 18%),
-    linear-gradient(0deg, #04060be8, #04060b4d 16%, transparent 40%),
-    radial-gradient(ellipse at 60% 46%, transparent 52%, #02040755);
-}
-.explorer:is([data-view="habitat"], [data-view="ground"]) .vignette {
-  background:
-    linear-gradient(180deg, #04060bbd, transparent 20%),
-    linear-gradient(0deg, #04060be8, transparent 35%);
+    linear-gradient(180deg, #04060b99, transparent 16%),
+    linear-gradient(0deg, #04060bcc, #04060b33 16%, transparent 36%);
 }
 .topbar {
   position: absolute;
