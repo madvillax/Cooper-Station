@@ -1,3 +1,5 @@
+<img src="public/station-mark.svg" alt="" width="72" height="72" />
+
 # Cooper Station
 
 A real-time 3D space simulation in the browser. Fly through the Solar System,
@@ -6,7 +8,7 @@ Cooper Station, a rotating cylinder habitat in orbit around Saturn.
 
 Live site: https://cooperstation-mu.vercel.app/
 
-![Cooper Station](public/station-preview.webp)
+![Cooper Station orbiting Saturn](public/og-image.jpg)
 
 ## What you can do
 

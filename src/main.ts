@@ -6,6 +6,7 @@ import close from "@tabler/icons/outline/x.svg?raw";
 import down from "@tabler/icons/outline/chevron-down.svg?raw";
 import help from "@tabler/icons/outline/keyboard.svg?raw";
 import list from "@tabler/icons/outline/list-details.svg?raw";
+import mark from "./mark.svg?raw";
 import minus from "@tabler/icons/outline/minus.svg?raw";
 import orbit from "@tabler/icons/outline/orbit.svg?raw";
 import pause from "@tabler/icons/outline/player-pause.svg?raw";
@@ -47,6 +48,7 @@ const icons: Record<string, string> = {
   down,
   help,
   list,
+  mark,
   minus,
   orbit,
   pause,
