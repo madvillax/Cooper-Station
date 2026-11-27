@@ -9,6 +9,7 @@ import {
 } from "./destinations";
 import { makeSkyDome, makeStarField } from "./environment";
 import { DEFAULT_RPM, radiansPerSecond } from "./physics";
+import { createGovernor, tierSettings, type Tier } from "./quality";
 import { createStation } from "./station";
 import {
   macrotask,
@@ -180,7 +181,7 @@ export async function startFlight({
 
   const sun = new THREE.DirectionalLight(0xf4e2d4, 3.22);
   sun.position.set(-5, 8, 9);
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(2048, 2048); // resized per quality tier in applyTier
   sun.shadow.camera.left = sun.shadow.camera.bottom = -9.6;
   sun.shadow.camera.right = sun.shadow.camera.top = 9.6;
   sun.shadow.camera.near = 0.4;
@@ -255,12 +256,29 @@ export async function startFlight({
   let viewportWidth = 1;
   let viewportHeight = 1;
   let maximumRatio = 1;
-  let pixelRatio = 1;
-  let previousDraw = 0;
-  let slowFrames = 0;
-  let fastFrames = 0;
+  let lastDraw = 0;
+  let displayInterval = 16.7;
   let lastSunAngle = Infinity;
-  let lastSunUpdate = -Infinity;
+
+  // Quality follows measured load. Real GPU timings are used where the browser
+  // exposes them; otherwise load is inferred from the time between frames.
+  const gl = renderer.getContext() as WebGL2RenderingContext;
+  const timer = gl.getExtension("EXT_disjoint_timer_query_webgl2") as {
+    TIME_ELAPSED_EXT: number;
+    GPU_DISJOINT_EXT: number;
+  } | null;
+  const GPU_BUDGET_MS = 11;
+  let gpuQuery: WebGLQuery | null = null;
+  let gpuQueryOpen = false;
+  const governor = createGovernor({
+    initial:
+      matchMedia("(pointer: coarse)").matches ||
+      (navigator.hardwareConcurrency ?? 8) <= 4
+        ? "balanced"
+        : "high",
+    upThreshold: timer ? 0.5 : 0.95,
+  });
+  let quality = tierSettings[governor.tier];
   let lastDaylightAngle = Infinity;
 
   function initialOrbit(): Orbit {
@@ -315,6 +333,7 @@ export async function startFlight({
         : null;
     destination = next;
     view = "orbital";
+    governor.discard();
     travelProgress = travelTarget = nextStop;
     wheelDistance = 0;
     keys.clear();
@@ -430,33 +449,72 @@ export async function startFlight({
     camera.updateProjectionMatrix();
     const density = Math.sqrt(2_560_000 / (viewportWidth * viewportHeight));
     maximumRatio = Math.min(devicePixelRatio, 1.65, density);
-    setRenderRatio(maximumRatio);
-    previousDraw = slowFrames = fastFrames = 0;
+    setRenderRatio(maximumRatio * quality.scale);
+    lastDraw = 0;
+    governor.discard();
     dirty = true;
   }
 
   function setRenderRatio(ratio: number) {
-    pixelRatio = ratio;
     renderer.setDrawingBufferSize(viewportWidth, viewportHeight, ratio);
     stars.setDensity(ratio);
   }
 
-  function adaptResolution(now: number) {
-    const interval = now - previousDraw;
-    if (previousDraw > 0) {
-      const missedBudget = interval > 48 ? 3 : interval > 23 ? 1 : -1;
-      slowFrames = Math.max(0, slowFrames + missedBudget);
-      fastFrames = interval < 18.8 ? fastFrames + 1 : 0;
-      const floor = Math.min(maximumRatio, 0.5);
-      if (slowFrames >= 6 && pixelRatio > floor) {
-        setRenderRatio(Math.max(floor, pixelRatio * (interval > 48 ? 0.68 : 0.86)));
-        slowFrames = fastFrames = 0;
-      } else if (fastFrames >= 150 && pixelRatio < maximumRatio) {
-        setRenderRatio(Math.min(maximumRatio, pixelRatio + 0.1));
-        slowFrames = fastFrames = 0;
-      }
+  function applyTier(tier: Tier) {
+    quality = tierSettings[tier];
+    setRenderRatio(maximumRatio * quality.scale);
+    const size = quality.shadowSize || 1024;
+    if (sun.shadow.mapSize.x !== size) {
+      sun.shadow.mapSize.set(size, size);
+      sun.shadow.map?.dispose();
+      sun.shadow.map = null;
+      lastSunAngle = Infinity;
     }
-    previousDraw = now;
+    lastDraw = 0;
+    dirty = true;
+  }
+
+  /**
+   * Feeds the governor one frame. With a timer query, load is GPU time against
+   * a budget that leaves headroom inside a 60 Hz frame. Without one, it is the
+   * gap between frames against the display's own rate, which is estimated as
+   * the shortest gap seen recently.
+   */
+  function measureLoad(now: number) {
+    let load: number | null = null;
+    if (timer) {
+      if (gpuQuery && !gpuQueryOpen) {
+        if (gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT_AVAILABLE)) {
+          const disjoint = gl.getParameter(timer.GPU_DISJOINT_EXT);
+          const nanoseconds = gl.getQueryParameter(gpuQuery, gl.QUERY_RESULT);
+          gl.deleteQuery(gpuQuery);
+          gpuQuery = null;
+          if (!disjoint) load = nanoseconds / 1e6 / GPU_BUDGET_MS;
+        }
+      }
+    } else if (lastDraw > 0) {
+      const interval = now - lastDraw;
+      displayInterval = clamp(Math.min(displayInterval + 0.002, interval), 6.9, 16.7);
+      load = interval / (displayInterval * 1.15);
+    }
+    lastDraw = now;
+    if (load === null) return;
+    const change = governor.sample(load, now);
+    if (change) applyTier(change);
+  }
+
+  function draw() {
+    const timed = timer && !gpuQuery;
+    if (timed) {
+      gpuQuery = gl.createQuery();
+      gl.beginQuery(timer.TIME_ELAPSED_EXT, gpuQuery!);
+      gpuQueryOpen = true;
+    }
+    renderer.render(scene, camera);
+    if (timed) {
+      gl.endQuery(timer.TIME_ELAPSED_EXT);
+      gpuQueryOpen = false;
+    }
   }
 
   function setCutaway(enabled: boolean) {
@@ -508,6 +566,7 @@ export async function startFlight({
         };
     view = next;
     keys.clear();
+    governor.discard();
     if (isHabitatView(next)) {
       walk = { ...(next === "ground" ? groundStart : flyoverStart) };
       look = { yaw: walk.yaw, pitch: walk.pitch };
@@ -680,7 +739,7 @@ export async function startFlight({
     const delta = Math.min(frameSeconds, 0.06);
     last = now;
     if (!available || document.hidden) {
-      previousDraw = 0;
+      lastDraw = 0;
       return;
     }
     const spinning = destination === "station" && playing && rpm > 0;
@@ -726,7 +785,9 @@ export async function startFlight({
       !animateCity &&
       !flying
     ) {
-      previousDraw = slowFrames = fastFrames = 0;
+      // Nothing to draw: gaps between frames no longer say anything about load.
+      lastDraw = 0;
+      governor.discard();
       return;
     }
     if (keys.size && !transition && allowControls()) stepControls(delta);
@@ -766,18 +827,18 @@ export async function startFlight({
       dirty = true;
     }
     atmosphere.density = habitatLight * 0.069;
-    adaptResolution(now);
-    const detailedLighting = pixelRatio >= Math.min(0.86, maximumRatio * 0.78);
+    measureLoad(now);
+    const detailedLighting = quality.shadowSize > 0;
     const sunShadows =
       detailedLighting && destination === "station" && !inside && !isCutaway;
     sun.shadow.intensity = sunShadows ? 1 : 0;
     const spinAngle = station.spin.rotation.z;
     if (sunShadows) {
-      const angleChange = Math.abs(spinAngle - lastSunAngle);
-      if (now - lastSunUpdate >= 42 && angleChange >= 0.007) {
+      // Refresh on every frame the station turns. A refresh every few frames
+      // makes frame cost alternate, which reads as stutter on slower machines.
+      if (spinAngle !== lastSunAngle) {
         sun.shadow.needsUpdate = true;
         lastSunAngle = spinAngle;
-        lastSunUpdate = now;
       }
     }
     if (destination === "station") {
@@ -833,7 +894,7 @@ export async function startFlight({
     stars.mesh.position.copy(camera.position);
     stars.mesh.visible = !inside;
     atlas.faceCamera(camera, elapsed);
-    renderer.render(scene, camera);
+    draw();
     dirty = false;
   }
 
@@ -893,7 +954,8 @@ export async function startFlight({
   document.addEventListener("visibilitychange", () => {
     keys.clear();
     last = performance.now();
-    previousDraw = slowFrames = fastFrames = 0;
+    lastDraw = 0;
+    governor.discard();
     dirty = true;
   });
   host.addEventListener("pointerdown", (event) => {
@@ -995,7 +1057,8 @@ export async function startFlight({
   });
   renderer.domElement.addEventListener("webglcontextrestored", () => {
     lastSunAngle = Infinity;
-    lastSunUpdate = -Infinity;
+    gpuQuery = null;
+    gpuQueryOpen = false;
     daylight.shadow.needsUpdate = true;
     reflection?.dispose();
     reflection = stationReflections(renderer);
@@ -1007,6 +1070,7 @@ export async function startFlight({
   host.append(renderer.domElement);
   new ResizeObserver(fit).observe(host);
   fit();
+  applyTier(governor.tier);
   setDestination(initialDestination);
   setView(initialView);
   transition = null;
@@ -1091,7 +1155,15 @@ export async function startFlight({
   let chain = Promise.resolve();
   for (const group of warmOrder(initialDestination)) {
     const stages = group === "system" ? atlas.textureStages("system") : [];
-    chain = chain.then(() => runStages(stages, () => {}, macrotask)).catch(() => {});
+    chain = chain
+      .then(() =>
+        runStages(stages, () => {}, async () => {
+          // An upload just ran on this thread; do not let it look like load.
+          governor.discard();
+          await macrotask();
+        }),
+      )
+      .catch(() => {});
     warmed.set(group, chain);
   }
 
@@ -1103,6 +1175,14 @@ export async function startFlight({
   return {
     /** Resolves once a destination group can be shown without a hitch. */
     whenWarm: (group: WarmGroup) => warmed.get(group) ?? Promise.resolve(),
+    /** Pins a quality tier, or returns control to the governor with "auto". */
+    setQuality(next: Tier | "auto") {
+      const change = governor.pin(next);
+      if (change) applyTier(change);
+    },
+    get quality() {
+      return governor.tier;
+    },
     setDestination,
     setView,
     zoom,
