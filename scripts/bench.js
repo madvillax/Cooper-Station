@@ -55,6 +55,13 @@
 
   const canvas = () => document.querySelector("#world canvas");
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // Unlike timers, message tasks are not throttled in a hidden pane.
+  const macrotask = () =>
+    new Promise((resolve) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => resolve();
+      channel.port2.postMessage(null);
+    });
 
   function pump(frames) {
     for (let i = 0; i < frames; i++) {
@@ -110,11 +117,13 @@
     // results arrive a few frames late, hence the short tail.
     const gpu = window.__gpuSamples;
     if (gpu) gpu.length = 0;
-    pump(frames);
+    // Yield after every frame so timer-query results can arrive.
+    for (let i = 0; i < frames; i++) {
+      pump(1);
+      await macrotask();
+    }
     const steady = recording;
     recording = null;
-    await sleep(20);
-    pump(4);
     const gpuSorted = gpu ? [...gpu].sort((a, b) => a - b) : [];
     const cost = steady.map((frame) => frame.ms).sort((a, b) => a - b);
     const last = steady[steady.length - 1] ?? settle[settle.length - 1];

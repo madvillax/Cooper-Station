@@ -242,10 +242,19 @@ export function makeSkyDome(
   mesh.renderOrder = 10;
   mesh.visible = false;
   let loading: Promise<void> | undefined;
+  let loaded = false;
+  let shown = true;
   return {
     mesh,
     setExposure(exposure: number) {
       material.uniforms.exposure.value = exposure;
+    },
+    /** Shared with the Gargantua lens, which draws the sky itself. */
+    panorama: material.uniforms.panorama,
+    orientation: material.uniforms.orientation,
+    setShown(visible: boolean) {
+      shown = visible;
+      mesh.visible = loaded && shown;
     },
     /** Starts (once) and resolves when the panorama is on the GPU. */
     load() {
@@ -256,7 +265,8 @@ export function makeSkyDome(
         texture.anisotropy = 8;
         upload(texture);
         material.uniforms.panorama.value = texture;
-        mesh.visible = true;
+        loaded = true;
+        mesh.visible = shown;
         invalidate();
       });
       return loading;

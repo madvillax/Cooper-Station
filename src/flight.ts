@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { createAtlas } from "./atlas";
+import { HORIZON_RADIUS } from "./black-hole";
 import {
   isSolarDestination,
   solarRoute,
@@ -151,9 +152,9 @@ export async function startFlight({
   };
   const upload = (texture: THREE.Texture) => renderer.initTexture(texture);
   const entryGroup = warmGroup(initialDestination);
-  const atlas = createAtlas(invalidate, upload);
-  const stars = makeStarField();
   const sky = makeSkyDome(invalidate, upload);
+  const atlas = createAtlas(invalidate, upload, sky);
+  const stars = makeStarField();
   // Start downloads now so decoding overlaps the station build.
   void sky.load().catch(() => {});
   atlas.preload(entryGroup === "system" ? "system" : "station");
@@ -316,7 +317,8 @@ export async function startFlight({
       case "galaxy":
         return 31.5 * Math.max(1, 0.91 / aspect);
       case "blackhole":
-        return 21 * Math.max(1, 0.75 / aspect);
+        // About 25 Schwarzschild radii out, where the whole disk fits the view.
+        return 25 * HORIZON_RADIUS * Math.max(1, 0.75 / aspect);
       case "station":
         return (view === "cutaway" ? 24.6 : 25.6) * Math.max(1, 1.09 / aspect);
       default:
@@ -486,6 +488,7 @@ export async function startFlight({
 
   function usePipeline() {
     post.setTier(quality);
+    atlas.setLensQuality(quality.lensSteps);
     // Lamps and windows are authored at screen white; in the HDR buffer they
     // are pushed past 1.0 so the bloom picks them up.
     for (const [material, base] of emissives) {
@@ -658,7 +661,13 @@ export async function startFlight({
     if (isHabitatView(view)) return;
     orbitTarget.zoom = clamp(
       orbitTarget.zoom * factor,
-      destination === "system" ? 0.74 : destination === "station" ? 0.44 : 0.39,
+      destination === "system"
+        ? 0.74
+        : destination === "station"
+          ? 0.44
+          : destination === "blackhole"
+            ? 0.08 // down to 2 Schwarzschild radii
+            : 0.39,
       2.6,
     );
     dirty = true;
@@ -938,8 +947,11 @@ export async function startFlight({
             ? 0.17
             : THREE.MathUtils.lerp(0.31, 0.065, sunApproach),
     );
+    // At Gargantua the lens shader draws the sky itself, bent.
+    const lensed = destination === "blackhole";
+    sky.setShown(!lensed);
     stars.mesh.position.copy(camera.position);
-    stars.mesh.visible = !inside;
+    stars.mesh.visible = !inside && !lensed;
     atlas.faceCamera(camera, elapsed);
     draw();
     dirty = false;

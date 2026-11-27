@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { makeBlackHole, makeGalaxy } from "./deep-space";
+import { makeBlackHole } from "./black-hole";
+import { makeGalaxy } from "./deep-space";
 import {
   planets,
   type Destination,
@@ -17,6 +18,7 @@ const systemPlaneTilt = 0.26;
 export function createAtlas(
   invalidate: () => void,
   upload: (texture: THREE.Texture) => void,
+  sky: { panorama: THREE.IUniform; orientation: THREE.IUniform },
 ) {
   const root = new THREE.Group();
   const system = new THREE.Group();
@@ -26,7 +28,7 @@ export function createAtlas(
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const sunlight = new THREE.Vector3();
-  const blackHole = makeBlackHole();
+  const blackHole = makeBlackHole(sky);
   const galaxy = makeGalaxy();
   let uranusRing: THREE.Mesh<THREE.RingGeometry, THREE.ShaderMaterial> | undefined;
   root.add(system, close, galaxy, blackHole.mesh);
@@ -430,5 +432,6 @@ export function createAtlas(
     preload,
     warm,
     setHdr,
+    setLensQuality: blackHole.setQuality,
   };
 }
