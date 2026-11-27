@@ -9,7 +9,8 @@ import {
   type View,
 } from "./destinations";
 import { makeSkyDome, makeStarField } from "./environment";
-import { DEFAULT_RPM, radiansPerSecond } from "./physics";
+import { DEFAULT_SOLAR_RATE, timeRates } from "./bodies-data";
+import { DEFAULT_RPM, daysSinceJ2000, radiansPerSecond } from "./physics";
 import { createPost } from "./post";
 import { createGovernor, tierSettings, type Tier } from "./quality";
 import { createStation } from "./station";
@@ -261,6 +262,10 @@ export async function startFlight({
   let transition: Transition | null = null;
   let rpm = DEFAULT_RPM;
   let timeScale = 1;
+  // The simulation clock starts now and runs at `solarRate` seconds per second.
+  let simDays = daysSinceJ2000(new Date());
+  let spinHours = 0;
+  let solarRate = timeRates.solar[DEFAULT_SOLAR_RATE];
   let playing = !motionPreference.matches;
   let dirty = true;
   let running = false;
@@ -367,10 +372,14 @@ export async function startFlight({
 
   function solarPose(stop: SolarDestination, target: Pose) {
     const aspect = viewportWidth / viewportHeight;
-    let yaw = orbit.yaw + 0.07;
-    let pitch = orbit.pitch + 0.17;
-    let distance = 29 * Math.max(1, 0.76 / aspect);
-    focus.set(0, -0.043 * distance * Math.max(orbit.zoom, 0.74), 0);
+    // The overview looks sunward from just outside Saturn's orbit, wherever
+    // Saturn is on the simulation date, so the rings are always the foreground.
+    const saturn = atlas.getBody("saturn").frame.position;
+    // Offset to the side that puts Saturn lower right, clear of the data card.
+    let yaw = orbit.yaw + Math.atan2(saturn.x, saturn.z) - 0.6;
+    let pitch = orbit.pitch + 0.34;
+    let distance = 21 * Math.max(1, 0.76 / aspect);
+    focus.copy(saturn).multiplyScalar(0.62);
     if (stop !== "system") {
       const body = atlas.getBody(stop);
       focus.copy(body.frame.position);
@@ -392,7 +401,7 @@ export async function startFlight({
       Math.sin(pitch) * distance,
       Math.cos(yaw) * Math.cos(pitch) * distance,
     );
-    if (stop !== "system") target.position.add(focus);
+    target.position.add(focus);
     cameraMatrix.lookAt(target.position, focus, worldUp);
     target.rotation.setFromRotationMatrix(cameraMatrix);
   }
@@ -807,6 +816,12 @@ export async function startFlight({
       station.city.update(cityTime);
     }
     if (animateSpace) elapsed += delta;
+    if (playing) {
+      simDays += (delta * solarRate) / 86_400;
+      // Planets turn at up to an hour per second; beyond that they would strobe.
+      spinHours += (delta * Math.min(solarRate, 3600)) / 3600;
+    }
+    atlas.setDate(simDays, spinHours);
     const flying = travelProgress !== travelTarget;
     if (flying) {
       const limit = maximumStopsPerSecond * delta;
@@ -1261,10 +1276,22 @@ export async function startFlight({
       );
       dirty = true;
     },
-    setSpin(nextRpm: number, multiplier: number, active: boolean) {
+    setSpin(nextRpm: number) {
       rpm = nextRpm;
-      timeScale = multiplier;
-      playing = active;
+      dirty = true;
+    },
+    /**
+     * Time control. `stationRate` multiplies the station's spin; `solarRate`
+     * is seconds of simulated time per real second for orbits and rotation.
+     */
+    setClock(clock: { playing: boolean; stationRate: number; solarRate: number }) {
+      playing = clock.playing;
+      timeScale = clock.stationRate;
+      solarRate = clock.solarRate;
+      dirty = true;
+    },
+    setGuides(visible: boolean) {
+      atlas.setGuides(visible);
       dirty = true;
     },
   };

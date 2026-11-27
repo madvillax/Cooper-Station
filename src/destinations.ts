@@ -1,11 +1,10 @@
+/** `orbit` is the scene radius of the planet's (compressed) orbit. */
 export const planets = [
   {
     id: "mercury",
     name: "Mercury",
     color: 0xa69789,
     orbit: 4.8,
-    size: 0.42,
-    phase: 2.57,
     tilt: 0.01,
   },
   {
@@ -13,8 +12,6 @@ export const planets = [
     name: "Venus",
     color: 0xe4bc83,
     orbit: 7.1,
-    size: 0.62,
-    phase: 0.14,
     tilt: 3.09,
   },
   {
@@ -22,8 +19,6 @@ export const planets = [
     name: "Earth",
     color: 0x638ee5,
     orbit: 9.7,
-    size: 0.69,
-    phase: 0.56,
     tilt: 0.41,
   },
   {
@@ -31,8 +26,6 @@ export const planets = [
     name: "Mars",
     color: 0xd47750,
     orbit: 12.9,
-    size: 0.5,
-    phase: 1.48,
     tilt: 0.44,
   },
   {
@@ -40,8 +33,6 @@ export const planets = [
     name: "Jupiter",
     color: 0xd5ad8f,
     orbit: 18.1,
-    size: 1.62,
-    phase: 5.83,
     tilt: 0.05,
   },
   {
@@ -49,8 +40,6 @@ export const planets = [
     name: "Saturn",
     color: 0xddc69c,
     orbit: 23.1,
-    size: 1.28,
-    phase: 0.88,
     tilt: 0.47,
   },
   {
@@ -58,8 +47,6 @@ export const planets = [
     name: "Uranus",
     color: 0x95d7da,
     orbit: 28.5,
-    size: 0.91,
-    phase: 4.18,
     tilt: 1.71,
   },
   {
@@ -67,8 +54,6 @@ export const planets = [
     name: "Neptune",
     color: 0x6d95d1,
     orbit: 34.2,
-    size: 0.87,
-    phase: 5.02,
     tilt: 0.49,
   },
 ] as const;

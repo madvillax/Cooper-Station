@@ -213,7 +213,8 @@ function syncSpin() {
     "aria-label",
     `Time scale ${timeScale} times. Change time scale.`,
   );
-  flight?.setSpin(rpm, timeScale, playing);
+  flight?.setSpin(rpm);
+  flight?.setClock({ playing, stationRate: timeScale, solarRate: 600 });
 }
 
 function syncLaunchMotion() {

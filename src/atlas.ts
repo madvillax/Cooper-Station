@@ -6,16 +6,31 @@ import {
   type Destination,
   type SolarDestination,
 } from "./destinations";
-import { loadTexture, makeSolarCorona } from "./environment";
+import {
+  MOON_PERIOD_DAYS,
+  orbital,
+  overviewSize,
+  radiusKm,
+  rotationHours,
+  type BodyId,
+} from "./bodies-data";
+import { loadTexture, makeSolarCorona, seededRandom } from "./environment";
+import { orbitAngle } from "./physics";
 import type { Stage } from "./warmup";
 
-type BodyId = (typeof planets)[number]["id"] | "sun" | "moon";
+const TAU = Math.PI * 2;
 const sunDirection = new THREE.Vector3(-0.9, 0.38, 0.62).normalize();
 const sphere = new THREE.SphereGeometry(1, 96, 64);
-const systemSun = new THREE.Vector3(-8, 1.7, -13);
-const systemPlaneTilt = 0.26;
 /** Radius of the atmosphere shell, in planet radii. */
 const AIR_SHELL = 1.07;
+
+/**
+ * A point on a planet's orbit, in scene units. Orbits lie in the horizontal
+ * plane and run counter-clockwise seen from the north, like the real ones.
+ */
+function onOrbit(angle: number, radius: number, target: THREE.Vector3) {
+  return target.set(Math.cos(angle) * radius, 0, -Math.sin(angle) * radius);
+}
 
 export function createAtlas(
   invalidate: () => void,
@@ -228,11 +243,11 @@ export function createAtlas(
             day *= 1.0 - 0.82 * ringShade;
 
             vec3 halfway = normalize(sunlight + viewDir);
-            float glint = pow(max(dot(n, halfway), 0.0), 110.0)
+            float glint = pow(max(dot(n, halfway), 0.0), 170.0)
               * water * (1.0 - smoothstep(0.04, 0.5, cloud)) * step(0.0, incoming);
             vec3 lights = texture2D(nightMap, coordinates).rgb * hasNight * (1.0 - smoothstep(-0.26, 0.08, incoming)) * 0.82;
             vec3 rendered = ground * (0.017 + day * 1.20) + lights
-              + vec3(1.0, 0.94, 0.82) * glint * 2.4
+              + vec3(1.0, 0.94, 0.82) * glint * 0.32
               + airColor * edge * atmosphere * (0.045 + twilight * 0.47);
             // Thick atmospheres absorb more along the slanted path at the limb.
             rendered *= mix(1.0, pow(max(facing, 0.02), 0.35), limbDarkening);
@@ -422,13 +437,62 @@ export function createAtlas(
   }
   const surfaces = [...pickTargets.keys()];
   let current: Destination = "system";
-  let systemTime = 0;
-  let previousTime = 0;
+  let simDays = 0;
+  let spinHours = 0;
+
+  // Orbit lines and the asteroid belt: aids, not objects, so one switch hides
+  // them all.
+  const guides = new THREE.Group();
+  const point = new THREE.Vector3();
+  for (const planet of planets) {
+    const path: number[] = [];
+    for (let i = 0; i < 160; i++) {
+      onOrbit((i / 160) * TAU, planet.orbit, point);
+      path.push(point.x, point.y, point.z);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(path, 3));
+    guides.add(
+      new THREE.LineLoop(
+        geometry,
+        new THREE.LineBasicMaterial({
+          color: planet.color,
+          transparent: true,
+          opacity: 0.2,
+          depthWrite: false,
+        }),
+      ),
+    );
+  }
+  {
+    // The main belt, between Mars and Jupiter.
+    const random = seededRandom(4471);
+    const rocks: number[] = [];
+    for (let i = 0; i < 2200; i++) {
+      onOrbit(random() * TAU, 14.3 + (random() + random()) * 1.15, point);
+      rocks.push(point.x, point.y + (random() - 0.5) * 0.5, point.z);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(rocks, 3));
+    guides.add(
+      new THREE.Points(
+        geometry,
+        new THREE.PointsMaterial({
+          color: 0x6f695e,
+          size: 1.2,
+          sizeAttenuation: false,
+          transparent: true,
+          opacity: 0.34,
+          depthWrite: false,
+        }),
+      ),
+    );
+  }
+  system.add(guides);
 
   function setView(
     next: Exclude<Destination, Exclude<SolarDestination, "system">>,
   ) {
-    if (next === "system") systemTime = 0;
     current = next;
     system.visible = next === "system";
     close.visible =
@@ -453,58 +517,64 @@ export function createAtlas(
         saturn.rotation.set(0.23, 0.08, -0.28);
       }
     }
+    if (next === "system") layOut();
+  }
+
+  /** Puts every body where it is on the simulation date. */
+  function layOut() {
+    const sun = bodies.get("sun");
+    if (sun) {
+      sun.frame.position.set(0, 0, 0);
+      sun.frame.scale.setScalar(overviewSize(radiusKm.sun));
+    }
+    for (const planet of planets) {
+      const item = bodies.get(planet.id);
+      if (!item) continue;
+      const { meanLongitudeDeg, periodDays } = orbital[planet.id];
+      onOrbit(
+        orbitAngle(meanLongitudeDeg, periodDays, simDays),
+        planet.orbit,
+        item.frame.position,
+      );
+      item.frame.scale.setScalar(overviewSize(radiusKm[planet.id]));
+      item.light.copy(sunlight.copy(item.frame.position).negate().normalize());
+    }
+    const earth = bodies.get("earth");
+    const moon = bodies.get("moon");
+    if (earth && moon) {
+      const radius = earth.frame.scale.x;
+      const angle = (simDays / MOON_PERIOD_DAYS) * TAU;
+      moon.frame.scale.setScalar(radius * (radiusKm.moon / radiusKm.earth));
+      moon.frame.position
+        .set(
+          Math.cos(angle) * radius * 2.45,
+          radius * 0.22,
+          -Math.sin(angle) * radius * 2.45,
+        )
+        .add(earth.frame.position);
+      moon.light.copy(earth.light);
+    }
+  }
+
+  /**
+   * Sets the simulation clock. `days` (since J2000) places bodies on their
+   * orbits; `hours` turns them on their axes and is advanced separately, so
+   * fast-forwarding the orbits does not spin the planets into a blur.
+   */
+  function setDate(days: number, hours: number) {
+    simDays = days;
+    spinHours = hours;
   }
 
   function update(elapsed: number) {
-    if (current === "system") {
-      systemTime += elapsed - previousTime;
-      const sun = bodies.get("sun");
-      if (sun) {
-        sun.frame.position.copy(systemSun);
-        sun.frame.scale.setScalar(3.5);
-      }
-      for (const planet of planets) {
-        const item = bodies.get(planet.id);
-        if (!item) continue;
-        const angle =
-          planet.phase + systemTime * (0.006 / Math.sqrt(planet.orbit));
-        const depth = Math.sin(angle) * planet.orbit;
-        item.frame.position.set(
-          systemSun.x + Math.cos(angle) * planet.orbit,
-          systemSun.y - depth * systemPlaneTilt,
-          systemSun.z + depth,
-        );
-        const foregroundScale =
-          planet.id === "saturn" ? 2.85 : planet.id === "jupiter" ? 0.72 : 0.48;
-        item.frame.scale.setScalar(planet.size * foregroundScale);
-        item.light.copy(
-          sunlight.copy(systemSun).sub(item.frame.position).normalize(),
-        );
-      }
-      const earth = bodies.get("earth");
-      const moon = bodies.get("moon");
-      if (earth && moon) {
-        const radius = earth.frame.scale.x;
-        const angle = 0.64 + elapsed * 0.039;
-        moon.frame.scale.setScalar(radius * 0.273);
-        moon.frame.position
-          .set(
-            Math.cos(angle) * radius * 2.45,
-            radius * 0.22,
-            -Math.sin(angle) * radius * 2.45,
-          )
-          .add(earth.frame.position);
-        moon.light.copy(earth.light);
-        earth.material.uniforms.cloudDrift.value = (elapsed * 0.0018) % 1;
-      }
-    }
-    previousTime = elapsed;
+    if (current === "system") layOut();
     if (current === "galaxy") galaxy.rotation.y = elapsed * 0.019;
+    const earth = bodies.get("earth");
+    if (earth) earth.material.uniforms.cloudDrift.value = (spinHours * 0.0011) % 1;
     for (const [id, item] of bodies) {
       if (item.frame.visible) {
         const offset = id === "earth" ? 0.96 : id === "jupiter" ? 1.4 : 0;
-        item.surface.rotation.y =
-          offset + elapsed * (id === "jupiter" ? 0.086 : 0.042);
+        item.surface.rotation.y = offset + (spinHours / rotationHours[id]) * TAU;
         item.pole
           .set(0, 1, 0)
           .applyQuaternion(item.axis.quaternion)
@@ -576,5 +646,9 @@ export function createAtlas(
     warm,
     setHdr,
     setLensQuality: blackHole.setQuality,
+    setDate,
+    setGuides(visible: boolean) {
+      guides.visible = visible;
+    },
   };
 }
