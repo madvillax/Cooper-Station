@@ -4,6 +4,7 @@ import { makeHabitatCity } from "./habitat-city";
 import { makeHabitatLandscape } from "./habitat-landscape";
 import { HALF_LENGTH, RADIUS, TAU } from "./habitat-surface";
 import { makeStationExterior } from "./station-exterior";
+import { runStages } from "./warmup";
 
 function makeHabitatInfrastructure() {
   const group = new THREE.Group();
@@ -185,20 +186,67 @@ function makeHabitatInfrastructure() {
   return group;
 }
 
-export function createStation() {
-  const exterior = makeStationExterior();
-  const city = makeHabitatCity();
-  const landscape = makeHabitatLandscape();
-  landscape.add(city.group);
-
+/**
+ * Builds the station in steps, yielding between them, so the launch sequence
+ * keeps moving while roughly a third of a second of geometry is generated.
+ */
+export async function createStation(
+  report: (fraction: number, label: string) => void,
+) {
+  // Meshes live in `visuals`; lights are added to `spin` beside it. Hiding the
+  // station hides only the meshes, so the scene's light count never changes
+  // (it is part of every shader's cache key).
+  const visuals = new THREE.Group();
   const spin = new THREE.Group();
-  spin.add(exterior.group, landscape, makeHabitatInfrastructure());
+  spin.add(visuals);
   const root = new THREE.Group();
   root.rotation.set(-0.16, -0.73, -0.12);
   root.add(spin);
+
+  let exterior!: ReturnType<typeof makeStationExterior>;
+  let city!: ReturnType<typeof makeHabitatCity>;
+  let landscape!: ReturnType<typeof makeHabitatLandscape>;
+  const label = "Building the station";
+  await runStages(
+    [
+      {
+        label,
+        weight: 3,
+        run() {
+          exterior = makeStationExterior();
+          visuals.add(exterior.group);
+        },
+      },
+      {
+        label,
+        weight: 4,
+        run() {
+          landscape = makeHabitatLandscape();
+        },
+      },
+      {
+        label,
+        weight: 4,
+        run() {
+          city = makeHabitatCity();
+          landscape.add(city.group);
+          visuals.add(landscape);
+        },
+      },
+      {
+        label,
+        weight: 1,
+        run() {
+          visuals.add(makeHabitatInfrastructure());
+        },
+      },
+    ],
+    report,
+  );
   return {
     root,
     spin,
+    visuals,
     removablePanels: exterior.removablePanels,
     entryPath: exterior.entryPath,
     landscape,

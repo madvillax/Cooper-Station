@@ -1,33 +1,24 @@
-@font-face {
-  font-family: "Geist";
-  src: url("/fonts/geist/Geist-Variable.woff2") format("woff2");
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Orbitron";
-  src: url("/fonts/orbitron/orbitron-latin-600.woff2") format("woff2");
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-}
-
 :root {
-  --ui-font: "Geist", system-ui, sans-serif;
-  --control-font: "Orbitron", var(--ui-font);
-  font-family: var(--ui-font);
-  color: #f2f5fd;
-  background: #05070d;
+  /* B612 was drawn for aircraft cockpit displays (and named after the Little
+     Prince's asteroid). One family for words, its mono cut for numbers. */
+  --text: "B612", system-ui, sans-serif;
+  --numerals: "B612 Mono", ui-monospace, monospace;
+  --display: var(--text);
+  --void: #05070d;
+  --ink: #eef2fa;
+  --muted: #9aa6ba;
+  --hairline: #c9d6ea3d;
+  --tick: #c9d6ea8c;
+  --amber: #ffb86b;
+  --panel: #05070dbd;
+  --control: 36px;
+  --gutter: clamp(14px, 2.4vw, 32px);
+  --edge-top: max(14px, env(safe-area-inset-top));
+  --edge-bottom: max(18px, env(safe-area-inset-bottom));
+  font-family: var(--text);
+  color: var(--ink);
+  background: var(--void);
   color-scheme: dark;
-  --ink: #f2f5fd;
-  --muted: #b0bacd;
-  --line: #a9c2ea40;
-  --accent: #b8d3ff;
-  --control-height: 40px;
-  --hud-bottom: max(26px, env(safe-area-inset-bottom));
-  --gutter: clamp(16px, 3.15vw, 54px);
 }
 
 *,
@@ -59,8 +50,8 @@ a {
   text-underline-offset: 3px;
 }
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
 }
 [hidden] {
   display: none !important;
@@ -208,103 +199,108 @@ a {
 }
 .launch-content h1 {
   margin: 0;
-  font-family: var(--control-font);
-  font-size: clamp(1.65rem, 5.25vw, 4.5rem);
-  font-weight: 600;
-  line-height: 1.12;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-family: var(--display);
+  font-size: clamp(1.7rem, 5vw, 4.1rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
   text-wrap: balance;
   text-shadow: 0 3px 28px #02050dbf;
 }
-:is(.launch-button, .hud-button, .icon-button, .brand, .destination-button) {
-  --control-fill: #090b12e6;
-  --control-border: #d8e5f5a8;
-  --control-glow: #d9e9ff17;
-  position: relative;
-  isolation: isolate;
+.launch-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: var(--control-height);
-  gap: 8px;
-  padding: 0 14px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font-family: var(--control-font);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: 0.105em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-:is(.launch-button, .hud-button, .icon-button, .brand, .destination-button)::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  pointer-events: none;
-  border: 1px solid var(--control-border);
-  background: var(--control-fill);
-  transform: skewX(-17deg);
-  box-shadow: 0 0 16px var(--control-glow);
-  transition:
-    background-color 200ms ease,
-    border-color 200ms ease,
-    box-shadow 200ms ease;
-}
-:is(.launch-button, .hud-button, .icon-button, .brand, .destination-button):focus-visible {
-  outline: none;
-}
-:is(.launch-button, .hud-button, .icon-button, .brand, .destination-button):focus-visible::before {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-:is(.launch-button, .hud-button, .icon-button, .brand, .destination-button):is(:hover, :focus-visible):not(:disabled)::before {
-  border-color: #fff;
-  background: #202638;
-  box-shadow: 0 0 22px #bcd9ff42;
-}
-:is(.launch-button, .hud-button, .icon-button, .brand, .destination-button):active:not(:disabled)::before {
-  background: #151925;
-}
-:is(.hud-button, .icon-button, .destination-button):is([aria-pressed="true"], [aria-expanded="true"]) {
-  --control-border: #e2edff;
-  --control-fill: #26354d;
-  --control-glow: #bcd9ff2e;
-}
-.launch-button {
-  --control-fill: #090b12cc;
-  --control-border: #fff;
+  gap: 14px;
   min-width: 206px;
-  min-height: 54px;
-  gap: 17px;
-  padding: 0 22px;
-  color: #fff;
-  font-size: 13px;
-  letter-spacing: 0.14em;
+  min-height: 52px;
+  padding: 0 24px;
+  border: 1px solid var(--amber);
+  border-radius: 2px;
+  background: var(--amber);
+  color: #0b0d12;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
 }
-.launch-button::before {
-  box-shadow: 0 0 20px var(--control-glow);
+.launch-button:is(:hover, :focus-visible):not(:disabled) {
+  border-color: #ffd29c;
+  background: #ffd29c;
 }
 .launch-arrow {
   display: grid;
   place-items: center;
 }
-.launch-arrow svg,
-.hud-button [data-icon="arrow"] svg {
+.launch-arrow svg {
   width: 17px;
   height: 17px;
-  transition: transform 200ms ease;
-}
-.launch-button:is(:hover, :focus-visible):not(:disabled) .launch-arrow svg,
-.hud-button:is(:hover, :focus-visible) [data-icon="arrow"] svg {
-  transform: translate(1.5px, -1.5px);
 }
 .launch-button:disabled {
   opacity: 0.72;
+}
+.launch-progress {
+  width: min(320px, 78vw);
+}
+.launch-status {
+  margin: 0 0 10px;
+  font-family: var(--numerals);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.launch-bar {
+  height: 2px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+.launch-bar span {
+  display: block;
+  height: 100%;
+  background: var(--amber);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 260ms ease-out;
+}
+.launch-sound {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.launch-sound input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--amber);
+}
+/* Loading: the button and the sound choice make way for the progress line. */
+.launch.is-loading :is(.launch-button, .launch-sound) {
+  display: none;
+}
+/* Launching: the photos drift apart and out, as if left behind. Only
+   transform and opacity change, so the compositor runs it without the main
+   thread, which is busy building the station at this moment. */
+.launch-photo,
+.launch-content h1 {
+  transition:
+    transform 1900ms cubic-bezier(0.5, 0, 0.9, 0.4),
+    opacity 1500ms ease-in;
+}
+.launch.is-launching .launch-photo {
+  opacity: 0;
+  transform: translate(
+      calc(-50% + (var(--photo-x) - 50%) * 9),
+      calc(-50% + (var(--photo-y) - 50%) * 9)
+    )
+    rotate(var(--photo-tilt)) scale(1.9);
+}
+.launch.is-launching .launch-content h1 {
+  opacity: 0;
 }
 .launch-error {
   max-width: 350px;
@@ -318,6 +314,8 @@ a {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ---------- The view ---------- */
 
 .world {
   cursor: grab;
@@ -335,172 +333,416 @@ a {
   height: 100%;
   display: block;
 }
-.vignette {
-  pointer-events: none;
-  background:
-    linear-gradient(180deg, #04060bbd, transparent 18%),
-    linear-gradient(0deg, #04060be8, #04060b4d 16%, transparent 40%),
-    radial-gradient(ellipse at 60% 46%, transparent 52%, #02040755);
-}
-.explorer:is([data-view="habitat"], [data-view="ground"]) .vignette {
-  background:
-    linear-gradient(180deg, #04060bbd, transparent 20%),
-    linear-gradient(0deg, #04060be8, transparent 35%);
-}
-.topbar {
+/* Darkens only the strips the HUD text sits on. The lens vignette itself is
+   drawn by the renderer. */
+.shade {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  padding: max(18px, env(safe-area-inset-top)) var(--gutter) 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  inset: 0;
   pointer-events: none;
+  background:
+    linear-gradient(180deg, #05070d8f, transparent 13%),
+    linear-gradient(15deg, #05070dd9, #05070d40 26%, transparent 44%);
 }
-.top-actions,
-.station-actions {
-  display: flex;
+
+/* ---------- Shared pieces ---------- */
+
+/* A panel is marked by four corner ticks rather than a box, like the framing
+   marks in a viewfinder, so the picture reads through it. */
+.panel {
+  position: relative;
+  background: var(--panel);
+}
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  --arm: 9px;
+  background:
+    linear-gradient(var(--tick), var(--tick)) top left / var(--arm) 1px,
+    linear-gradient(var(--tick), var(--tick)) top left / 1px var(--arm),
+    linear-gradient(var(--tick), var(--tick)) top right / var(--arm) 1px,
+    linear-gradient(var(--tick), var(--tick)) top right / 1px var(--arm),
+    linear-gradient(var(--tick), var(--tick)) bottom left / var(--arm) 1px,
+    linear-gradient(var(--tick), var(--tick)) bottom left / 1px var(--arm),
+    linear-gradient(var(--tick), var(--tick)) bottom right / var(--arm) 1px,
+    linear-gradient(var(--tick), var(--tick)) bottom right / 1px var(--arm);
+  background-repeat: no-repeat;
+}
+
+.tool,
+.action {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-}
-.station-actions {
-  flex-wrap: wrap;
-}
-.topbar :is(button, a) {
-  pointer-events: auto;
-}
-.start-link {
+  justify-content: center;
+  gap: 7px;
+  min-height: var(--control);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
   text-decoration: none;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background-color 140ms ease;
 }
-.brand {
-  --control-border: #c1d0e57d;
-}
-.brand [data-icon] {
-  color: var(--accent);
-}
-.icon-button {
-  width: var(--control-height);
+.tool {
+  width: var(--control);
   padding: 0;
   flex: none;
 }
-.hud-button.primary {
-  --control-border: #fff;
-  --control-fill: #1c2739f5;
-  --control-glow: #c8deff2c;
-  color: #fff;
+.tool--text {
+  width: auto;
+  padding: 0 11px;
+}
+.action {
+  padding: 0 13px;
+}
+:is(.tool, .action):is(:hover, :focus-visible):not(:disabled) {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+:is(.tool, .action):active:not(:disabled) {
+  background: #121826;
+}
+:is(.tool, .action):is([aria-pressed="true"], [aria-expanded="true"]) {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+/* The one thing to do next is the only filled control on screen. */
+.action--primary,
+.action--primary:is(:hover, :focus-visible):not(:disabled) {
+  border-color: var(--amber);
+  background: var(--amber);
+  color: #0b0d12;
+  font-weight: 700;
+}
+.action--primary:is(:hover, :focus-visible):not(:disabled) {
+  border-color: #ffd29c;
+  background: #ffd29c;
+}
+.action--primary:active:not(:disabled) {
+  background: #f0a655;
 }
 [data-icon] {
   display: inline-flex;
   flex: none;
 }
-[data-icon] svg,
-.icon-button > svg {
+[data-icon] svg {
   width: 17px;
   height: 17px;
   stroke-width: 1.6;
 }
-.brand [data-icon] svg {
+
+/* ---------- Top bar ---------- */
+
+.topbar {
+  position: absolute;
+  inset: var(--edge-top) var(--gutter) auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+.topbar > * {
+  pointer-events: auto;
+}
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: var(--control);
+  margin-right: auto;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-decoration: none;
+  text-shadow: 0 1px 12px var(--void);
+}
+.wordmark [data-icon] {
+  color: var(--amber);
+}
+.wordmark [data-icon] svg {
   width: 21px;
   height: 21px;
 }
-.zoom-controls {
-  position: absolute;
-  right: var(--gutter);
-  top: calc(max(18px, env(safe-area-inset-top)) + var(--control-height) + 11px);
-  display: grid;
-  gap: 7px;
-}
-.location {
-  position: absolute;
-  bottom: var(--hud-bottom);
-  left: var(--gutter);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  max-width: calc(100% - var(--gutter) * 2);
-  pointer-events: none;
-  text-shadow:
-    0 2px 20px #03050b,
-    0 1px 5px #03050b;
-}
-.location button {
-  pointer-events: auto;
-  text-shadow: none;
-}
-.location h1 {
-  margin: 0;
-  font-family: var(--control-font);
-  font-size: clamp(1.125rem, 2.1vw, 1.55rem);
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
-}
-.body-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--body-color);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--body-color), transparent 50%);
-}
-.spin-panel {
-  position: absolute;
-  left: var(--gutter);
-  bottom: calc(var(--hud-bottom) + 84px);
-  width: min(274px, calc(100% - var(--gutter) * 2));
-  border: 1px solid var(--line);
-  background: #090b12f5;
-  padding: 14px 16px;
-  font-size: 13px;
-  box-shadow: 0 10px 36px #0103098a;
-}
-.spin-heading,
-.spin-footer {
+.clock,
+.tools {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
 }
-.spin-heading {
-  justify-content: space-between;
-  font-family: var(--control-font);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+/* Time sits top centre: it applies to the whole simulation, not one place. */
+.clock {
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
 }
-.spin-footer > span {
-  margin-right: auto;
+#time-rate,
+.date {
+  font-family: var(--numerals);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+#time-rate {
+  min-width: 92px;
+}
+.date {
+  min-width: 96px;
+  padding: 0 4px;
+  color: var(--muted);
+  text-shadow: 0 1px 10px var(--void);
+}
+
+/* Zoom and reset sit bottom right, under the hand that holds the mouse. */
+.view-tools {
+  position: absolute;
+  right: var(--gutter);
+  bottom: var(--edge-bottom);
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------- Where you are ---------- */
+
+.place {
+  position: absolute;
+  left: var(--gutter);
+  bottom: var(--edge-bottom);
+  width: min(304px, calc(100% - var(--gutter) * 2));
+  padding: 15px 16px 16px;
+}
+.place h1 {
+  margin: 0;
+  padding-right: 30px;
+  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.005em;
+}
+.summary {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 16px;
+  margin: 13px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+  font-size: 12.5px;
+}
+.facts dt {
+  color: var(--muted);
+}
+.facts dd {
+  margin: 0;
+  text-align: right;
+  font-family: var(--numerals);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.facts dd[data-live] {
+  color: var(--amber);
+}
+.place-toggle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+}
+.place-toggle svg {
+  transition: transform 160ms ease;
+}
+.place-toggle[aria-expanded="false"] svg {
+  transform: rotate(180deg);
+}
+.actions:has(> :not([hidden])) {
+  margin-top: 14px;
+}
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.spin-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+}
+.spin-label {
+  display: block;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 .spin-panel input {
   width: 100%;
-  margin: 8px 0 10px;
-  accent-color: var(--accent);
+  margin: 8px 0 6px;
+  accent-color: var(--amber);
   cursor: pointer;
 }
-.spin-panel output {
-  color: var(--accent);
-  font-family: var(--control-font);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-.spin-footer button {
-  height: 32px;
-  min-height: 32px;
-  width: 34px;
-  font-size: 10px;
+.spin-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
+/* ---------- Route rail ----------
+   The planets on a ruler of real distance from the Sun (logarithmic, or the
+   inner four would sit on top of each other). */
+
+.rail {
+  position: absolute;
+  left: calc(var(--gutter) + 304px + 28px);
+  right: calc(var(--gutter) + var(--control) * 3 + 12px + 28px);
+  bottom: calc(var(--edge-bottom) - 4px);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 620px;
+  margin-inline: auto;
+}
+.rail-track {
+  position: relative;
+  flex: 1;
+  height: 44px;
+}
+.rail-track::before {
+  content: "";
+  position: absolute;
+  inset: 21px 0 auto;
+  height: 1px;
+  background: var(--hairline);
+}
+.rail-stop {
+  position: absolute;
+  top: 0;
+  left: calc(var(--at) * 100%);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 44px;
+  margin-left: -13px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.rail-stop::before {
+  content: "";
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: var(--body-color);
+  box-shadow: 0 0 0 3px var(--void);
+  transition: box-shadow 140ms ease;
+}
+.rail-stop:is(:hover, :focus-visible)::before {
+  box-shadow:
+    0 0 0 3px var(--void),
+    0 0 0 4px var(--ink);
+}
+.rail-stop[aria-current="true"]::before {
+  box-shadow:
+    0 0 0 3px var(--void),
+    0 0 0 4px var(--amber);
+}
+.rail-name {
+  position: absolute;
+  top: 31px;
+  left: 50%;
+  translate: -50% 0;
+  color: var(--amber);
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+.rail-stop:is([aria-current="true"], :hover, :focus-visible) .rail-name {
+  opacity: 1;
+}
+.rail-stop:is(:hover, :focus-visible):not([aria-current="true"]) .rail-name {
+  color: var(--ink);
+}
+/* A hovered neighbour's name would collide with the current one. */
+.rail-track:has(.rail-stop:is(:hover, :focus-visible):not([aria-current="true"]))
+  .rail-stop[aria-current="true"]
+  .rail-name {
+  opacity: 0;
+}
+
+/* ---------- Labels in the view ---------- */
+
+.labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.body-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 3px 6px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  text-shadow:
+    0 0 6px var(--void),
+    0 0 2px var(--void);
+  white-space: nowrap;
+  pointer-events: auto;
+  opacity: 0.82;
+  will-change: transform;
+}
+.body-label:is(:hover, :focus-visible) {
+  color: var(--amber);
+  opacity: 1;
+}
+
+/* ---------- Hints, reticle, stick ---------- */
+
+.hint {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--edge-top) + var(--control) + 26px);
+  translate: -50% 0;
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  background: var(--panel);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: hint-in 320ms ease both;
+}
+@keyframes hint-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 .reticle {
   display: none;
   position: absolute;
   pointer-events: none;
   inset: 50% auto auto 50%;
-  transform: translate(-50%, -50%);
+  translate: -50% -50%;
   border: 1px solid #eff5fcaa;
   width: 11px;
   height: 11px;
@@ -509,140 +751,269 @@ a {
 .explorer:is([data-view="habitat"], [data-view="ground"]) .reticle {
   display: block;
 }
-.move-pad {
+.stick {
   position: absolute;
-  bottom: var(--hud-bottom);
   right: var(--gutter);
-  display: grid;
-  grid-template-columns: repeat(3, var(--control-height));
-  gap: 6px;
-}
-.move-pad button {
+  bottom: var(--edge-bottom);
+  width: 104px;
+  height: 104px;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: #05070d80;
   touch-action: none;
 }
-.move-pad button:first-child {
-  grid-column: 2;
+.stick-knob {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background: #121826cc;
+  pointer-events: none;
 }
-.move-pad button:nth-child(2) {
-  grid-column: 1;
+/* The stick is for touch; a mouse and keyboard already have W A S D. */
+@media (hover: hover) and (pointer: fine) {
+  .stick {
+    display: none;
+  }
+}
+.restore {
+  position: absolute;
+  top: var(--edge-top);
+  right: var(--gutter);
+  opacity: 0.55;
+}
+.restore:is(:hover, :focus-visible) {
+  opacity: 1;
+}
+/* "Hide controls": only the view, and a way back. */
+.explorer.bare > :not(.world, .restore) {
+  display: none;
 }
 
-dialog {
+/* ---------- Sheets (Atlas, Controls, Settings) ---------- */
+
+.sheet {
   position: fixed;
-  inset: 68px var(--gutter) auto auto;
+  inset: calc(var(--edge-top) + var(--control) + 12px) var(--gutter) auto auto;
   margin: 0;
-  width: min(366px, calc(100% - var(--gutter) * 2));
-  max-height: calc(100dvh - 86px);
+  width: min(380px, calc(100% - var(--gutter) * 2));
+  max-height: calc(100dvh - var(--edge-top) - var(--control) - 30px);
   overflow: auto;
-  padding: 17px;
-  border: 1px solid #a5bde35d;
+  padding: 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
   color: var(--ink);
-  background: #090b12f5;
-  box-shadow: 0 20px 60px #0009;
+  background: #070a12f7;
 }
-dialog::backdrop {
-  background: #02050a60;
+.sheet::backdrop {
+  background: #02050a66;
 }
-.catalog-header {
+.sheet-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  margin-bottom: 12px;
 }
-.catalog-header h2 {
+.sheet-header h2 {
   margin: 0;
-  font-size: 26px;
-  font-weight: 550;
-  letter-spacing: -0.05em;
+  font-size: 19px;
+  font-weight: 700;
 }
-.catalog-header .icon-button {
-  min-height: 33px;
-  width: 34px;
+.sheet-note {
+  margin: 6px 0 14px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
 }
-.destination-group {
-  margin-top: 15px;
+.destination-group + .destination-group {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
 }
 .destination-group h3 {
-  margin: 0 0 9px;
+  margin: 0 0 4px;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-family: var(--control-font);
-  font-size: 10px;
-  font-weight: 600;
-}
-.destination-entries {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px 11px;
+  font-size: 12.5px;
+  font-weight: 400;
 }
 .destination-button {
-  --control-border: #c1d0e571;
-  --control-glow: transparent;
-  justify-content: flex-start;
-  min-height: 36px;
-  padding: 5px 10px;
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  align-items: baseline;
+  column-gap: 11px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 2px;
+  background: none;
   text-align: left;
-  font-size: 10px;
-  letter-spacing: 0.07em;
-  white-space: normal;
+  font-size: 14px;
+}
+.destination-button:is(:hover, :focus-visible) {
+  background: #121826;
+}
+.destination-button[aria-current="true"] {
+  color: var(--amber);
+}
+.destination-button small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.body-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--body-color);
+  translate: 0 -1px;
 }
 .credits {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--hairline);
   margin: 14px 0 0;
   padding-top: 10px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.5;
   color: var(--muted);
 }
+.keys {
+  margin: 0;
+  font-size: 13.5px;
+}
+.keys > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 0;
+  border-top: 1px solid var(--hairline);
+}
+.keys dt {
+  color: var(--muted);
+}
+.keys dd {
+  margin: 0;
+  text-align: right;
+}
+kbd {
+  display: inline-block;
+  min-width: 22px;
+  padding: 2px 5px;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  font-family: var(--numerals);
+  font-size: 11.5px;
+  text-align: center;
+  color: var(--ink);
+}
+.choice {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.choice legend {
+  margin-bottom: 8px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.choice label {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: var(--control);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.choice input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.choice label:has(input:checked) {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+.choice label:has(input:focus-visible) {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--control);
+  border-top: 1px solid var(--hairline);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.switch input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--amber);
+}
+#hide-hud {
+  margin-top: 10px;
+}
 
-@media (max-width: 640px) {
-  :root {
-    --control-height: 38px;
+/* ---------- Narrow screens ---------- */
+
+@media (max-width: 900px) {
+  /* No room beside the card: the rail takes the bottom edge, the card sits
+     above it and folds down to its title. */
+  .rail {
+    left: var(--gutter);
+    right: var(--gutter);
+    bottom: var(--edge-bottom);
   }
-  .topbar {
-    padding-top: max(13px, env(safe-area-inset-top));
+  .explorer:has(.rail:not([hidden])) .place {
+    bottom: calc(var(--edge-bottom) + 58px);
   }
-  :is(.hud-button, .brand) {
-    padding-inline: 9px;
-    gap: 6px;
-    font-size: 10px;
-    letter-spacing: 0.08em;
+  .place-toggle {
+    display: grid;
   }
-  .brand [data-icon] svg {
-    width: 18px;
-    height: 18px;
-  }
-  .top-actions,
-  .station-actions {
-    gap: 8px;
-  }
-  .start-link,
-  #exit-habitat {
-    width: var(--control-height);
-    padding: 0;
-  }
-  .start-link-label,
-  .exit-text {
+  .place:has(.place-toggle[aria-expanded="false"]) :is(.facts, .summary) {
     display: none;
   }
-  .zoom-controls {
-    top: calc(max(13px, env(safe-area-inset-top)) + var(--control-height) + 11px);
+  .view-tools {
+    top: 50%;
+    bottom: auto;
+    translate: 0 -50%;
+    flex-direction: column;
   }
-  .move-pad {
-    bottom: calc(var(--hud-bottom) + 74px);
-  }
-  .spin-panel:not([hidden]) ~ .move-pad {
-    bottom: calc(var(--hud-bottom) + 214px);
+  .explorer:is([data-view="habitat"], [data-view="ground"]) .place {
+    width: min(304px, calc(100% - var(--gutter) * 2 - 120px));
   }
 }
-@media (max-width: 420px) {
-  .brand {
-    width: var(--control-height);
-    padding: 0;
+@media (max-width: 640px) {
+  :root {
+    --control: 38px;
   }
-  .brand-label {
+  .wordmark-text,
+  .tool-label,
+  .date {
     display: none;
+  }
+  #time-rate {
+    min-width: 0;
+  }
+  .topbar {
+    gap: 6px;
+  }
+  .clock {
+    position: static;
+    translate: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -650,12 +1021,6 @@ dialog::backdrop {
   *::before,
   *::after {
     transition: none !important;
-  }
-  .launch-content {
-    animation: none;
-  }
-  .launch-button svg,
-  .hud-button [data-icon="arrow"] svg {
-    transform: none !important;
+    animation: none !important;
   }
 }
